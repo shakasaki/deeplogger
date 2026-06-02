@@ -80,17 +80,18 @@ def load_model(model_path: str):
 
 
 def run_predict(model, image: np.ndarray, device, in_channels: int) -> np.ndarray:
-    """Run inference on a single window image. Returns a (H, W) probability map."""
+    """Run inference on a single window image. Returns a (H, W) probability map.
+
+    Both UNetOTV and UNetATV handle channel reordering internally in forward(),
+    so input is passed as-is: OTV (H,W,3) → unsqueeze → (1,H,W,3);
+    ATV (H,W) → unsqueeze → (1,H,W).
+    """
     import torch
 
-    if in_channels == 1:
-        ch = image[:, :, 0] if image.ndim == 3 else image
-        tensor = torch.from_numpy(np.asarray(ch, dtype=np.float32)).unsqueeze(0).unsqueeze(0).to(device)
-    else:
-        img = np.asarray(image, dtype=np.float32)
-        if img.ndim == 2:
-            img = np.stack([img, img, img], axis=-1)
-        tensor = torch.from_numpy(img.transpose(2, 0, 1)).unsqueeze(0).to(device)
+    img = np.asarray(image, dtype=np.float32)
+    if in_channels == 1 and img.ndim == 3:
+        img = img[:, :, 0]
+    tensor = torch.from_numpy(img).unsqueeze(0).to(device)
     with torch.no_grad():
         pred = model(tensor)
     return pred.squeeze().cpu().numpy()
