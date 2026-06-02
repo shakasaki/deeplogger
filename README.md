@@ -62,6 +62,31 @@ Running this a second time will not re-download files that already exist. The
 data directory can be relocated with the `DEEPLOGGER_DATA_DIR` environment
 variable (defaults to `./data`).
 
+## Viewer (GUI)
+
+Fast pyqtgraph browse viewer for borehole logs, with a napari bridge for
+labeling. Needs the `[gui]` extra and a real display (won't work over plain
+SSH). Use the `deeplogger-gui` env:
+
+```bash
+conda activate deeplogger-gui
+python -m deeplogger.gui.viewer data/Bedretto_Input_HS/MB7/MB7_ATV_unknown.las
+```
+
+- A `.las` is converted to a multiscale zarr cache (`<dir>/.cache/`) on first
+  open — slow once; reopen the cached `.zarr` for instant browsing:
+  ```bash
+  python -m deeplogger.gui.viewer data/Bedretto_Input_HS/MB7/.cache/MB7_ATV_unknown.zarr
+  ```
+- Only depth (vertical) scrolls/zooms; azimuth is locked.
+- ATV controls: colormap, auto-contrast, **Remove SVD** (live destripe),
+  **Save processed…** (write the processed log to a new `.zarr`).
+- **Label window…**: zoom to a depth window, then open it in napari to draw a
+  label — freehand paint or the sinusoid picker (depth/dip/azimuth/aperture) —
+  and save an `[image, mask]` `.pt`. Zoom in first if the window is too tall.
+
+Legacy Streamlit GUI (being retired): `streamlit run app.py`.
+
 ## Tests
 
 ```bash
