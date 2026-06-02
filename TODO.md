@@ -9,7 +9,7 @@ Data layer (DONE — `deeplogger/las_reader.py`, `deeplogger/pyramid.py`, 117 te
 Route 1 — View / Pick data (GUI, in progress):
 - [x] **Fast browse viewer = pyqtgraph** (`deeplogger/gui/viewer.py`, `LogViewer`): real-depth Y axis, azimuth (X) locked, depth-only scroll/zoom swapping pyramid level/window, colormap dropdown + auto-contrast (ColorBarItem). Interactively confirmed good.
 - [x] Processing in viewer — SVD destripe spinbox (`remove_svd_components`, economy SVD); reprocesses full-res + re-pyramids for live preview (~1.6 s on real ATV)
-- [ ] Save processed data to a new zarr (so processed logs can be reloaded directly) — next
+- [x] Save processed data to a new zarr (so processed logs can be reloaded directly) — `LogViewer.save_processed()` + "Save processed…" button (file dialog); records `svd_removed` provenance in the store attrs
 - [ ] More processing steps if needed (median, bandpass/"bumper") — reuse in-repo `image_processing.py`/`filters.py`, port from `gdp` only what's missing
 - [ ] Lazy-LAS (no-convert) viewer source (currently zarr only)
 - [ ] Import flow with explicit user choice: **Convert & cache** (→ to_zarr) vs **Open directly (lazy)** (window-on-demand reads)

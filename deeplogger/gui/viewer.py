@@ -66,6 +66,9 @@ class LogViewer(QtWidgets.QWidget):
         self.data_type = attrs["data_type"]
         self._is_atv = self.data_type is DataType.ATV
         self._n_azimuth = int(attrs["n_azimuth"])
+        self._diameter = attrs.get("diameter")  # carried through on save
+        self._source_path = None  # set by from_zarr; seeds the save dialog dir
+        self._svd_removed = 0  # components currently destriped (provenance on save)
         self._start = float(self._depth[0])
         self._stop = float(self._depth[-1])
         self._factor = int(attrs.get("factor", 2))
@@ -109,7 +112,9 @@ class LogViewer(QtWidgets.QWidget):
     def from_zarr(cls, store_path, parent=None) -> "LogViewer":
         """Open a viewer directly from a zarr pyramid on disk."""
         levels, depth, attrs = read_zarr_pyramid(store_path)
-        return cls(levels, depth, attrs, parent=parent)
+        viewer = cls(levels, depth, attrs, parent=parent)
+        viewer._source_path = Path(store_path)
+        return viewer
 
     # --- controls ----------------------------------------------------------
 
@@ -147,6 +152,12 @@ class LogViewer(QtWidgets.QWidget):
         self._svd_box.valueChanged.connect(self._apply_svd)
         bar.addWidget(self._svd_box)
 
+        bar.addSpacing(16)
+        save = QtWidgets.QPushButton("Save processed…")
+        save.setToolTip("Write the currently displayed (processed) log to a new .zarr")
+        save.clicked.connect(self._on_save_clicked)
+        bar.addWidget(save)
+
         bar.addStretch(1)
         return bar
 
@@ -159,12 +170,58 @@ class LogViewer(QtWidgets.QWidget):
             processed = self._raw
         else:
             processed = remove_svd_components(self._raw, n_components)
+        self._svd_removed = n_components
         self._levels = build_depth_pyramid(
             processed, min_rows=self._min_rows, factor=self._factor
         )
         self.n_levels = len(self._levels)
         self._refresh()
         self._auto_contrast()  # amplitudes shrink after destriping; rescale
+
+    def save_processed(self, out_path: str | Path) -> Path:
+        """Write the currently displayed pyramid to a new zarr group.
+
+        Persists ``self._levels`` as they are right now — i.e. including any SVD
+        destriping applied via the controls — so a processed log can be reopened
+        directly without reprocessing. The number of SVD components removed is
+        recorded in the store's attributes for provenance.
+
+        Args:
+            out_path: Destination ``.zarr`` path (created/overwritten).
+
+        Returns:
+            The path to the written zarr group.
+
+        See Also:
+            deeplogger.pyramid.write_zarr_pyramid: The underlying writer.
+        """
+        from deeplogger.pyramid import write_zarr_pyramid
+
+        svd_n = self._svd_removed
+        return write_zarr_pyramid(
+            out_path,
+            self._levels,
+            self._depth,
+            data_type=self.data_type,
+            n_azimuth=self._n_azimuth,
+            diameter=self._diameter,
+            start_depth=self._start,
+            stop_depth=self._stop,
+            factor=self._factor,
+            extra_attrs={"svd_removed": svd_n} if svd_n else None,
+        )
+
+    def _on_save_clicked(self):
+        """Prompt for a path and save the processed log there."""
+        start_dir = str(self._source_path.parent) if self._source_path else ""
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save processed log", start_dir, "Zarr group (*.zarr)"
+        )
+        if not path:
+            return
+        if not path.endswith(".zarr"):
+            path += ".zarr"
+        self.save_processed(path)
 
     def _set_colormap(self, name: str):
         if self._cbar is not None and name:

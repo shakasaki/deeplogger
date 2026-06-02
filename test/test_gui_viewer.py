@@ -17,7 +17,11 @@ pg = pytest.importorskip("pyqtgraph")
 
 from deeplogger.config import DataType
 from deeplogger.gui.viewer import LogViewer
-from deeplogger.pyramid import build_depth_pyramid, write_zarr_pyramid
+from deeplogger.pyramid import (
+    build_depth_pyramid,
+    read_zarr_pyramid,
+    write_zarr_pyramid,
+)
 
 
 @pytest.fixture(scope="module")
@@ -88,6 +92,41 @@ def test_viewer_svd_control_reduces_stripes(qapp, tmp_path):
     viewer._apply_svd(1)
     after = float(np.var(np.asarray(viewer._levels[0]).mean(axis=0)))
     assert after < before * 0.2
+
+
+def test_save_processed_persists_destriped_data(qapp, tmp_path):
+    """save_processed should write the destriped pyramid (not the raw log) plus
+    the SVD provenance and carried-through diameter."""
+    rng = np.random.default_rng(3)
+    stripes = np.tile(rng.standard_normal(16) * 10.0, (4000, 1))
+    img = (stripes + rng.standard_normal((4000, 16))).astype(np.float32)
+    levels = build_depth_pyramid(img, min_rows=1000)
+    depth = np.linspace(0.0, 40.0, 4000)
+    store = write_zarr_pyramid(
+        tmp_path / "striped.zarr", levels, depth,
+        data_type=DataType.ATV, n_azimuth=16, diameter=0.076,
+        start_depth=0.0, stop_depth=40.0,
+    )
+    viewer = LogViewer.from_zarr(store)
+    viewer._apply_svd(2)
+    out = viewer.save_processed(tmp_path / "processed.zarr")
+
+    out_levels, out_depth, attrs = read_zarr_pyramid(out)
+    assert attrs["svd_removed"] == 2  # provenance recorded
+    assert attrs["diameter"] == 0.076  # metadata carried through
+    saved0 = np.asarray(out_levels[0][:])
+    # Saved level 0 matches the in-memory processed data, not the raw striped log.
+    np.testing.assert_array_equal(saved0, np.asarray(viewer._levels[0]))
+    assert not np.allclose(saved0, img)
+
+
+def test_save_processed_no_svd_omits_provenance(qapp, tmp_path):
+    """Saving without destriping should not write an svd_removed attr."""
+    store = _make_zarr(tmp_path, DataType.ATV)
+    viewer = LogViewer.from_zarr(store)
+    out = viewer.save_processed(tmp_path / "copy.zarr")
+    _, _, attrs = read_zarr_pyramid(out)
+    assert "svd_removed" not in attrs
 
 
 def test_viewer_zoom_y_loads_finer_level(qapp, tmp_path):

@@ -106,6 +106,42 @@ def test_zarr_roundtrip_atv(tmp_path: Path):
     assert attrs["n_levels"] == len(levels)
 
 
+def test_zarr_extra_attrs_roundtrip(tmp_path: Path):
+    """Provenance passed via extra_attrs should be stored and read back."""
+    img = np.zeros((2000, 8), dtype=np.float32)
+    levels = build_depth_pyramid(img, min_rows=500)
+    depth = np.linspace(0.0, 20.0, 2000)
+    store = write_zarr_pyramid(
+        tmp_path / "prov.zarr", levels, depth,
+        data_type=DataType.ATV, n_azimuth=8, diameter=None,
+        start_depth=0.0, stop_depth=20.0,
+        extra_attrs={"svd_removed": 3},
+    )
+    _, _, attrs = read_zarr_pyramid(store)
+    assert attrs["svd_removed"] == 3
+    assert attrs["n_levels"] == len(levels)  # standard keys still present
+
+
+def test_zarr_relazy_levels_roundtrip(tmp_path: Path):
+    """Lazy zarr levels (re-saving an opened store) should write correctly."""
+    img = np.arange(2000 * 8, dtype=np.float32).reshape(2000, 8)
+    levels = build_depth_pyramid(img, min_rows=500)
+    depth = np.linspace(0.0, 20.0, 2000)
+    first = write_zarr_pyramid(
+        tmp_path / "a.zarr", levels, depth,
+        data_type=DataType.ATV, n_azimuth=8, diameter=None,
+        start_depth=0.0, stop_depth=20.0,
+    )
+    lazy_levels, lazy_depth, _ = read_zarr_pyramid(first)  # zarr arrays, not numpy
+    second = write_zarr_pyramid(
+        tmp_path / "b.zarr", lazy_levels, lazy_depth,
+        data_type=DataType.ATV, n_azimuth=8, diameter=None,
+        start_depth=0.0, stop_depth=20.0,
+    )
+    out_levels, _, _ = read_zarr_pyramid(second)
+    np.testing.assert_array_equal(out_levels[0][:], levels[0])
+
+
 def test_zarr_roundtrip_otv(tmp_path: Path):
     """An OTV pyramid should round-trip with uint8 RGB preserved."""
     rng = np.random.default_rng(1)

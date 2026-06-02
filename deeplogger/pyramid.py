@@ -107,6 +107,7 @@ def write_zarr_pyramid(
     stop_depth: float,
     factor: int = 2,
     chunk_rows: int = 4096,
+    extra_attrs: dict | None = None,
 ) -> Path:
     """Write a multiscale pyramid and its depth vector to a zarr group.
 
@@ -117,6 +118,7 @@ def write_zarr_pyramid(
     Args:
         store_path: Directory path for the zarr group (created/overwritten).
         levels: Pyramid levels as returned by :func:`build_depth_pyramid`.
+            Lazy zarr arrays are accepted and read into memory on write.
         depth: Full-resolution depth vector of shape (N,).
         data_type: ATV or OTV.
         n_azimuth: Number of azimuth columns.
@@ -125,6 +127,10 @@ def write_zarr_pyramid(
         stop_depth: Last depth value in meters.
         factor: Downsampling factor used between levels (stored for reference).
         chunk_rows: Chunk size along the depth axis for the level arrays.
+        extra_attrs: Optional provenance metadata merged into the group
+            attributes after the standard keys (e.g. ``{"svd_removed": 3}`` to
+            record that the saved data was destriped). Round-trips via
+            :func:`read_zarr_pyramid`.
 
     Returns:
         The path to the written zarr group.
@@ -143,6 +149,7 @@ def write_zarr_pyramid(
     store_path = Path(store_path)
     group = zarr.open_group(store_path, mode="w")
     for i, level in enumerate(levels):
+        level = np.asarray(level)  # materialize lazy zarr levels (e.g. re-saving)
         chunks = (min(chunk_rows, level.shape[0]),) + level.shape[1:]
         arr = group.create_array(str(i), shape=level.shape, chunks=chunks, dtype=level.dtype)
         arr[:] = level
@@ -162,6 +169,8 @@ def write_zarr_pyramid(
             "n_levels": len(levels),
         }
     )
+    if extra_attrs:
+        group.attrs.update(extra_attrs)
     return store_path
 
 
