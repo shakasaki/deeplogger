@@ -1,3 +1,9 @@
+# Environment setup (see README.md for details):
+#   conda env create -f environment.yml       # `deeplogger`: training/dev, CUDA torch + [dev,gui]
+#   conda env create -f environment-gui.yml   # `deeplogger-gui`: GUI/inference, CPU-only torch + [gui]
+# Dependency versions below are the supported floors; requirements-lock-{train,gui}.txt
+# hold the exact tested versions for a pinned rebuild.
+
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"

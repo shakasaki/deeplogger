@@ -1,0 +1,20 @@
+# Training environment for DeepLogger (GPU/CUDA + dev tools + GUI).
+#
+#   conda env create -f environment.yml      # or: mamba env create -f environment.yml
+#   conda activate deeplogger
+#
+# This is the full environment for training and development: CUDA-enabled torch,
+# pytest, and the GUI stack. For a lightweight CPU-only viewer/inference env use
+# environment-gui.yml (the `deeplogger-gui` env).
+#
+# Python is pinned here; the Python dependencies are resolved from pyproject.toml
+# via the editable pip install below. For an exact, fully-pinned rebuild use
+# requirements-lock-train.txt instead (see README).
+name: deeplogger
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -e .[dev,gui]

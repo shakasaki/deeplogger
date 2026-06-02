@@ -1,0 +1,19 @@
+# GUI / inference environment for DeepLogger (CPU-only, lightweight).
+#
+#   conda env create -f environment-gui.yml   # or: mamba env create -f environment-gui.yml
+#   conda activate deeplogger-gui
+#
+# Installs CPU-only torch (no CUDA wheels) plus the GUI stack, for running the
+# napari/streamlit viewer and CPU inference. For GPU training use environment.yml
+# (the `deeplogger` env). Exact pinned rebuild: requirements-lock-gui.txt.
+name: deeplogger-gui
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cpu
+      - torch==2.12.0+cpu
+      - torchvision==0.27.0+cpu
+      - -e .[gui]
