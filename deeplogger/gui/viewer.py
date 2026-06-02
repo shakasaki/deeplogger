@@ -30,7 +30,12 @@ from deeplogger.pyramid import (
 pg.setConfigOption("imageAxisOrder", "row-major")
 
 # Colormaps offered in the dropdown (ATV only); filtered to those available.
-_COLORMAP_CHOICES = ["inferno", "viridis", "magma", "plasma", "cividis", "turbo", "gray"]
+# Warm/heat maps first — best match for ATV amplitude; afmhot is the default.
+_COLORMAP_CHOICES = [
+    "afmhot", "copper", "hot", "gist_heat",
+    "inferno", "viridis", "magma", "plasma", "cividis", "turbo", "gray",
+]
+_DEFAULT_COLORMAP = "afmhot"
 
 
 def _get_colormap(name: str):
@@ -94,7 +99,7 @@ class LogViewer(QtWidgets.QWidget):
         # Clean colorbar (two contrast handles) + colormap + SVD, for ATV only.
         if self._is_atv:
             self._raw = np.asarray(self._levels[0][:])  # full-res, for processing
-            self._cbar = pg.ColorBarItem(colorMap=_get_colormap("inferno"))
+            self._cbar = pg.ColorBarItem(colorMap=_get_colormap(_DEFAULT_COLORMAP))
             self._cbar.setImageItem(self._img)
             glw.addItem(self._cbar)
             main.addLayout(self._build_controls())
@@ -131,8 +136,8 @@ class LogViewer(QtWidgets.QWidget):
             except Exception:
                 pass
         self._cmap_box.addItems(available)
-        if "inferno" in available:
-            self._cmap_box.setCurrentText("inferno")
+        if _DEFAULT_COLORMAP in available:
+            self._cmap_box.setCurrentText(_DEFAULT_COLORMAP)
         # Connect after populating so the initial fill doesn't fire the handler.
         self._cmap_box.currentTextChanged.connect(self._set_colormap)
         bar.addWidget(self._cmap_box)

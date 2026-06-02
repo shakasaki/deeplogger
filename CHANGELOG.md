@@ -43,6 +43,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 - Corrected the `pyproject.toml` build-backend from the non-existent `setuptools.backends._legacy:_Backend` to `setuptools.build_meta` — the invalid value made `pip install` abort before installing anything, blocking clean environment creation
 
 ### Changed
+- Viewer ATV colormaps reordered to lead with warm/heat maps that best match acoustic amplitude (`afmhot`, `copper`, `hot`, `gist_heat`), with `afmhot` as the default (was `inferno`); the previous perceptual maps remain available below them. Chosen on visual review of real ATV logs.
+- Repository moved from GitLab to GitHub (`github.com/shakasaki/deeplogger`); updated clone URL, project metadata, and docs.
 - Migrated from `setup.py` to `pyproject.toml` — modern Python packaging with `[build-system]`, proper metadata, and separated `[project.optional-dependencies]` for dev and JAX extras
 - Fixed dependencies: removed invalid `logger` PyPI package (was conflicting with built-in `logging`; project uses custom `deeplogger/utils/logger.py`), removed duplicate `rasterio`/`shapely` entries, added missing `opencv-python`, added minimum version pins for all deps
 - Version bumped to `0.1.0` (from `0.0.1`) to mark the start of structured development
