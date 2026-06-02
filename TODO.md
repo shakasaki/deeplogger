@@ -16,9 +16,10 @@ Route 1 — View / Pick data (GUI, in progress):
 - [x] "Label window…" button → hands the **visible depth window** (full-res, cap 20k rows, warn to zoom in) to napari (`deeplogger/gui/labeler.py:launch_labeler`). Uses display bounds, not a separate ROI drag.
 - [ ] Start menu: [View / Pick data] | [Inference + Correct]
 - [x] Napari labeling (small window only) — mask mode: Labels layer freehand painting
-- [x] Napari labeling — sinusoid mode: magicgui geological-unit sliders (depth/dip/azimuth/aperture) + per-log diameter; "Add pick" rasterizes `labels.py:get_label` into the Labels layer
-- [x] Save the label as a `[image, mask]` .pt bundle (`labeler.save_label_bundle`). NOTE: not yet saving a structured `Fracture` pick table alongside — picks list is in-memory only; persist next.
-- [ ] Manual-verify the napari flow on a real log (button + paint + sinusoid + save); headless tests cover only the pure helpers + window cap
+- [x] Napari labeling — sinusoid mode: **interactive** mouse picking ("Pick structure": click=depth, drag x=azimuth/phase, drag y=dip/amplitude), live curve on a Shapes layer; per-log diameter + aperture fields. Replaced the slider interface.
+- [x] Save the label as a `[image, mask]` .pt bundle (`<borehole>_<start>m_<end>m.pt`) and save picks to `<borehole>_picks.csv` (Borehole/Depth/Dip/Azimuth, append). Direct-to-OUTPUT_DIR by default; editable in the Output settings panel.
+- [ ] Manual-verify the napari flow on a real log (Pick structure drag gesture, paint, save label + picks); headless tests cover only the pure helpers + window cap. Verify gesture sensitivity feels right (azimuth full-width=360°, dip from vertical swing).
+- [ ] Add aperture column to the picks CSV? (interactive pick has an aperture field but CSV omits it by design)
 - [ ] Reconcile `get_label` vs `apply_label` geometry mismatch (band = ±aperture/2 + corrections vs ±aperture, no corrections); labeler uses `get_label`
 
 Route 2 — Inference + Correct (later):
