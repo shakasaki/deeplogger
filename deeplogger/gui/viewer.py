@@ -32,8 +32,8 @@ pg.setConfigOption("imageAxisOrder", "row-major")
 # Colormaps offered in the dropdown (ATV only); filtered to those available.
 # Warm/heat maps first — best match for ATV amplitude; afmhot is the default.
 _COLORMAP_CHOICES = [
-    "afmhot", "copper", "hot", "gist_heat",
-    "inferno", "viridis", "magma", "plasma", "cividis", "turbo", "gray",
+    "afmhot", "plasma", "inferno", "copper", "hot", "gist_heat",
+    "viridis", "magma", "cividis", "turbo", "gray",
 ]
 _DEFAULT_COLORMAP = "afmhot"
 
