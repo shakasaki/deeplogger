@@ -83,12 +83,18 @@ class LogViewer(QtWidgets.QWidget):
 
         main = QtWidgets.QVBoxLayout(self)
 
-        # "Label window" applies to both ATV and OTV, so it lives above the
-        # ATV-only colormap/SVD controls bar.
+        # "Label window" and "Infer window" apply to both ATV and OTV.
+        btn_row = QtWidgets.QHBoxLayout()
         label_btn = QtWidgets.QPushButton("Label window…")
         label_btn.setToolTip("Open the visible depth window in napari to draw a label")
         label_btn.clicked.connect(self._on_label_clicked)
-        main.addWidget(label_btn)
+        btn_row.addWidget(label_btn)
+
+        infer_btn = QtWidgets.QPushButton("Infer window…")
+        infer_btn.setToolTip("Open the visible depth window in napari to run inference")
+        infer_btn.clicked.connect(self._on_infer_clicked)
+        btn_row.addWidget(infer_btn)
+        main.addLayout(btn_row)
 
         glw = pg.GraphicsLayoutWidget()
         self._plot = glw.addPlot()
@@ -367,6 +373,31 @@ class LogViewer(QtWidgets.QWidget):
             data_type=self.data_type,
             n_azimuth=self._n_azimuth,
             diameter=self._diameter,
+            source_name=name,
+        )
+
+    def _on_infer_clicked(self):
+        """Open the visible window in napari for inference."""
+        try:
+            image, depth = self.current_window()
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Window too large", str(exc))
+            return
+        from deeplogger.gui.inferencer import launch_inferencer
+
+        prev = getattr(self, "_inferencer", None)
+        if prev is not None:
+            try:
+                prev.close()
+            except Exception:
+                pass
+
+        name = self._source_path.stem if self._source_path else "window"
+        self._inferencer = launch_inferencer(
+            image,
+            depth,
+            data_type=self.data_type,
+            n_azimuth=self._n_azimuth,
             source_name=name,
         )
 
