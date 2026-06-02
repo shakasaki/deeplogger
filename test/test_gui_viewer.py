@@ -129,6 +129,32 @@ def test_save_processed_no_svd_omits_provenance(qapp, tmp_path):
     assert "svd_removed" not in attrs
 
 
+def test_current_window_returns_visible_slice(qapp, tmp_path):
+    """current_window should return the full-res image+depth for the view range."""
+    store = _make_zarr(tmp_path, DataType.ATV)  # 6000 rows over 0..60 m
+    viewer = LogViewer.from_zarr(store)
+    viewer.resize(400, 800)
+    viewer._plot.setYRange(20.0, 30.0, padding=0)
+    image, depth = viewer.current_window()
+    assert image.shape[0] == depth.shape[0]
+    assert image.shape[1] == viewer._n_azimuth
+    # ~1/6 of the 0..60 m log -> ~1000 of 6000 rows, well under the cap.
+    assert 800 < image.shape[0] < 1200
+    assert 19.0 < depth[0] < 21.0
+
+
+def test_current_window_caps_large_range(qapp, tmp_path, monkeypatch):
+    """A window above the row cap should raise (the 'zoom in' guard)."""
+    import deeplogger.gui.labeler as labeler
+
+    monkeypatch.setattr(labeler, "MAX_LABEL_ROWS", 10)
+    store = _make_zarr(tmp_path, DataType.ATV)
+    viewer = LogViewer.from_zarr(store)
+    viewer._plot.setYRange(viewer._start, viewer._stop, padding=0)
+    with pytest.raises(ValueError, match="Zoom in"):
+        viewer.current_window()
+
+
 def test_viewer_zoom_y_loads_finer_level(qapp, tmp_path):
     """Zooming the depth axis to a small window should load a finer level than
     the full-extent overview (the integration path: range change -> refresh)."""

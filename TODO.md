@@ -13,11 +13,13 @@ Route 1 — View / Pick data (GUI, in progress):
 - [ ] More processing steps if needed (median, bandpass/"bumper") — reuse in-repo `image_processing.py`/`filters.py`, port from `gdp` only what's missing
 - [ ] Lazy-LAS (no-convert) viewer source (currently zarr only)
 - [ ] Import flow with explicit user choice: **Convert & cache** (→ to_zarr) vs **Open directly (lazy)** (window-on-demand reads)
-- [ ] pyqtgraph ROI to select a small window → "Label this window" hands the window array to napari
+- [x] "Label window…" button → hands the **visible depth window** (full-res, cap 20k rows, warn to zoom in) to napari (`deeplogger/gui/labeler.py:launch_labeler`). Uses display bounds, not a separate ROI drag.
 - [ ] Start menu: [View / Pick data] | [Inference + Correct]
-- [ ] Napari labeling (small window only) — mask mode: Labels layer freehand painting
-- [ ] Napari labeling — sinusoid mode: magicgui geological-unit sliders (depth/dip/azimuth/aperture) driving a Shapes-layer curve from `labels.py:get_label`; per-log diameter field; derived amplitude/phase
-- [ ] "Add pick": rasterize via `apply_label` into mask AND append `Fracture` record to a pick table; save picks (mask array + structured table), with real depth coords from the window
+- [x] Napari labeling (small window only) — mask mode: Labels layer freehand painting
+- [x] Napari labeling — sinusoid mode: magicgui geological-unit sliders (depth/dip/azimuth/aperture) + per-log diameter; "Add pick" rasterizes `labels.py:get_label` into the Labels layer
+- [x] Save the label as a `[image, mask]` .pt bundle (`labeler.save_label_bundle`). NOTE: not yet saving a structured `Fracture` pick table alongside — picks list is in-memory only; persist next.
+- [ ] Manual-verify the napari flow on a real log (button + paint + sinusoid + save); headless tests cover only the pure helpers + window cap
+- [ ] Reconcile `get_label` vs `apply_label` geometry mismatch (band = ±aperture/2 + corrections vs ±aperture, no corrections); labeler uses `get_label`
 
 Route 2 — Inference + Correct (later):
 - [ ] Run inference on a (converted/lazy) log → prediction mask as editable Labels layer

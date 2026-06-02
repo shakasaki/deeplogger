@@ -83,6 +83,13 @@ class LogViewer(QtWidgets.QWidget):
 
         main = QtWidgets.QVBoxLayout(self)
 
+        # "Label window" applies to both ATV and OTV, so it lives above the
+        # ATV-only colormap/SVD controls bar.
+        label_btn = QtWidgets.QPushButton("Label window…")
+        label_btn.setToolTip("Open the visible depth window in napari to draw a label")
+        label_btn.clicked.connect(self._on_label_clicked)
+        main.addWidget(label_btn)
+
         glw = pg.GraphicsLayoutWidget()
         self._plot = glw.addPlot()
         self._plot.setLabel("left", "Depth", units="m")
@@ -296,6 +303,64 @@ class LogViewer(QtWidgets.QWidget):
         if self._first:
             self._auto_contrast()  # sensible initial contrast from real data
             self._first = False
+
+    # --- labeling ----------------------------------------------------------
+
+    def _visible_row_range(self) -> tuple[int, int]:
+        """Full-resolution row range currently in view (mirrors _refresh)."""
+        (_x0, _x1), (y0, y1) = self._plot.viewRange()
+        top = max(self._start, min(y0, y1))
+        bottom = min(self._stop, max(y0, y1))
+        r0 = self._nearest_row(top)
+        r1 = self._nearest_row(bottom)
+        if r1 <= r0:
+            r1 = min(r0 + 1, self._depth.shape[0])
+        return r0, r1
+
+    def current_window(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return the visible window as ``(image, depth)`` at full resolution.
+
+        The image reflects any processing applied (e.g. SVD destriping), since
+        it reads level 0 of the current pyramid.
+
+        Returns:
+            ``(image, depth)``: the full-resolution image for the visible depth
+            range and its depth vector (meters).
+
+        Raises:
+            ValueError: If the visible range exceeds ``MAX_LABEL_ROWS`` rows.
+        """
+        from deeplogger.gui.labeler import MAX_LABEL_ROWS
+
+        r0, r1 = self._visible_row_range()
+        if r1 - r0 > MAX_LABEL_ROWS:
+            raise ValueError(
+                f"Visible window is {r1 - r0} rows (max {MAX_LABEL_ROWS} for "
+                "labeling). Zoom in to a smaller depth range first."
+            )
+        image = np.asarray(self._levels[0][r0:r1])
+        depth = self._depth[r0:r1]
+        return image, depth
+
+    def _on_label_clicked(self):
+        """Open the visible window in napari for labeling (cap-guarded)."""
+        try:
+            image, depth = self.current_window()
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Window too large", str(exc))
+            return
+        from deeplogger.gui.labeler import launch_labeler
+
+        name = self._source_path.stem if self._source_path else "window"
+        # Keep a reference so the napari viewer is not garbage-collected.
+        self._labeler = launch_labeler(
+            image,
+            depth,
+            data_type=self.data_type,
+            n_azimuth=self._n_azimuth,
+            diameter=self._diameter,
+            source_name=name,
+        )
 
 
 def launch_viewer(path: str | Path) -> None:
