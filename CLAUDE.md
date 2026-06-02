@@ -74,4 +74,4 @@ Core: torch, numpy, scipy, pandas, scikit-image, scikit-learn, matplotlib, raste
 
 - `CHANGELOG.md` is the source of truth for what changed and *why*. It doubles as source material for the planned scientific manuscript, so log methodological decisions (not just code changes) there.
 - `TODO.md` tracks open work items, dated.
-- Repository is hosted on GitLab (`gitlab.com/shakasa/deeplogger`), not GitHub.
+- Repository is hosted on GitHub (`github.com/shakasaki/deeplogger`).

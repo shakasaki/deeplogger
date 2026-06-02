@@ -55,7 +55,7 @@ gui = [
 ]
 
 [project.urls]
-Repository = "https://gitlab.com/shakasa/deeplogger"
+Repository = "https://github.com/shakasaki/deeplogger"
 
 [tool.setuptools.packages.find]
 include = ["deeplogger*"]

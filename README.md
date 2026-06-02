@@ -6,7 +6,7 @@ Machine-Learning used for borehole televiewer data interpretation.
 
 Clone the repository:
 ```bash
-git clone https://gitlab.com/shakasa/deeplogger.git
+git clone https://github.com/shakasaki/deeplogger.git
 cd deeplogger
 ```
 
