@@ -263,15 +263,22 @@ def launch_labeler(
     def _toggle_pick():
         state["picking"] = not state["picking"]
         pick_btn.text = "Picking… (drag image)" if state["picking"] else "Pick structure"
+        # Freeze camera pan and select the image layer while picking, so the
+        # drag drives the gesture (not a pan) and the Labels brush stays idle.
+        viewer.camera.mouse_pan = not state["picking"]
+        if state["picking"]:
+            viewer.layers.selection = {image_layer}
 
-    def _on_drag(layer, event):
+    def _on_drag(viewer_, event):
+        # Attached at the viewer level so it fires regardless of the selected
+        # layer; coordinates are mapped through the image layer.
         if not state["picking"]:
             return
-        r0, c0 = layer.world_to_data(event.position)[:2]
+        r0, c0 = image_layer.world_to_data(event.position)[:2]
         click_row = int(round(r0))
         yield
         while event.type == "mouse_move":
-            r, c = layer.world_to_data(event.position)[:2]
+            r, c = image_layer.world_to_data(event.position)[:2]
             fr = gesture_to_fracture(
                 click_row, c - c0, r - r0, depth, n_azimuth, diam_w.value, aperture_w.value
             )
@@ -280,7 +287,7 @@ def launch_labeler(
             readout.value = f"depth {fr.depth:.2f} m | dip {fr.dip:.1f}° | az {fr.azimuth:.1f}°"
             yield
 
-    image_layer.mouse_drag_callbacks.append(_on_drag)
+    viewer.mouse_drag_callbacks.append(_on_drag)
 
     def _save_pick():
         fr = state["current"]

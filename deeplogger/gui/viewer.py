@@ -351,6 +351,14 @@ class LogViewer(QtWidgets.QWidget):
             return
         from deeplogger.gui.labeler import launch_labeler
 
+        # Close any previous labeler window so they don't stack and overlap.
+        prev = getattr(self, "_labeler", None)
+        if prev is not None:
+            try:
+                prev.close()
+            except Exception:
+                pass
+
         name = self._source_path.stem if self._source_path else "window"
         # Keep a reference so the napari viewer is not garbage-collected.
         self._labeler = launch_labeler(
