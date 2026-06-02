@@ -79,30 +79,50 @@ def load_model(model_path: str):
     return model, device, in_ch
 
 
+def _valid_height(H: int) -> int:
+    """Smallest H' >= H that round-trips cleanly through all UNetOTV skip connections.
+
+    Required: H % 16 == 8. This ensures H divisible by 8 (so pool1/2/3 halving
+    is exact) and H/8 is odd (so pool4 kernel=3 stride=2 round-trips via upconv4).
+    """
+    r = H % 16
+    if r == 8:
+        return H
+    return H + ((8 - r) % 16)
+
+
 def run_predict(model, image: np.ndarray, device, in_channels: int) -> np.ndarray:
     """Run inference on a single window image. Returns a (H, W) probability map.
 
     Both UNetOTV and UNetATV handle channel reordering internally in forward():
     - OTV forward() does permute(0,3,1,2), so expects (1,H,W,3) — channel-last.
     - ATV forward() does unsqueeze(0).permute(1,0,2,3), so expects (1,H,W).
+
+    Height is padded to the nearest valid size and cropped back on return so
+    the output always matches the input spatial dimensions.
     """
     import torch
 
     img = np.asarray(image, dtype=np.float32)
     if in_channels == 3:
-        # OTV needs (1, H, W, 3)
         if img.ndim == 2:
             img = np.stack([img, img, img], axis=-1)
         elif img.shape[-1] != 3:
             img = img[:, :, :3]
     else:
-        # ATV needs (1, H, W)
         if img.ndim == 3:
             img = img[:, :, 0]
+
+    H_orig = img.shape[0]
+    H_pad = _valid_height(H_orig)
+    if H_pad > H_orig:
+        pad_spec = [(0, H_pad - H_orig), (0, 0)] + ([(0, 0)] if img.ndim == 3 else [])
+        img = np.pad(img, pad_spec, mode="edge")
+
     tensor = torch.from_numpy(img).unsqueeze(0).to(device)
     with torch.no_grad():
         pred = model(tensor)
-    return pred.squeeze().cpu().numpy()
+    return pred.squeeze().cpu().numpy()[:H_orig]
 
 
 def compute_dice(prediction: np.ndarray, ground_truth: np.ndarray, threshold: float) -> float:
