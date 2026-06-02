@@ -40,6 +40,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 - `LasHeader.data_type` uses the existing `DataType` enum (consistency with `config.py`)
 
 ### Fixed
+- Labeler interactive picking made live: the candidate sinusoid is now drawn from a persistent "pick" Shapes layer that redraws on every parameter or drag change (and on open), so it previews and is editable *before* saving — previously the curve only appeared after "Save pick" (as the rasterized band). Added depth/dip/azimuth sliders that drive the curve; the drag gesture sets those sliders rather than rendering mid-drag.
+- Labeler pick tool was dead: the mouse-drag callback was on the image layer, which only fires when that layer is selected, but the later-added shapes layer stole selection. Moved the callback to the viewer level and froze camera pan + selected the image layer while picking.
+- "Label window…" opened a new `napari.Viewer` each click without closing the prior one, so windows stacked and only the top was reachable — now closes the previous labeler first.
 - Resolved merge conflict in `deeplogger/plotting.py` — kept `plot_atv_tt` (single travel-time plot) and removed conflicting `plot_comparison` stub that was superseded by `plot_comparison_am`/`plot_comparison_tt`
 - Resolved merge conflict in `.gitignore` — cleaned up nested conflict markers from prior stash/merge operations
 - Removed duplicate `matplotlib` imports in `plotting.py`
