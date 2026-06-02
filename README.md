@@ -12,7 +12,7 @@ cd deeplogger
 
 ### Reproducible environments (recommended)
 
-The repo ships two conda specs (both Python 3.11, editable install):
+The repo ships two conda specs (both Python 3.12, editable install):
 
 | Env | File | torch | Use for |
 | --- | --- | --- | --- |

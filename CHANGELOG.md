@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 ## [Unreleased]
 
 ### Added
+- Reproducible conda environments (no env files existed before): `environment.yml` (`deeplogger` — training/dev, CUDA torch + `[dev,gui]`) and `environment-gui.yml` (`deeplogger-gui` — lightweight GUI/inference, CPU-only torch + `[gui]`, skips ~3–4 GB of CUDA wheels). Both Python 3.12. Matching fully-pinned snapshots `requirements-lock-train.txt` (Linux + CUDA 13) and `requirements-lock-gui.txt` (CPU-only, with the PyTorch CPU index header) for bit-for-bit rebuilds. Setup documented in `README.md` and `pyproject.toml`. Standardized on **Python 3.12** across env files and `CLAUDE.md` (resolves a 3.11/3.12 mismatch — the 3.12 decision was already logged below; the env files now match).
 - `CLAUDE.md` — development guidance for AI-assisted coding sessions
 - `CHANGELOG.md` — change tracking, doubles as manuscript development narrative
 - `examples/inference_demo.py` — end-to-end CLI demo: loads prepared sample, runs trained U-Net, outputs 4-panel visualization (image, ground truth, prediction probability, overlay with Dice score) + preprocessing comparison. Supports `--sample-id`, `--threshold`, `--model-path` args

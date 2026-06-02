@@ -28,7 +28,7 @@ streamlit run app.py
 python examples/inference_demo.py --sample-id 0 --threshold 0.5
 ```
 
-Recommended: conda environment with Python 3.11.
+Recommended: conda environment with Python 3.12.
 
 ## Architecture
 
