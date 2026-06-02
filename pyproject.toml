@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deeplogger"
+version = "0.1.0"
+description = "Deep learning for borehole televiewer data interpretation"
+readme = "README.md"
+license = "LGPL-3.0-or-later"
+requires-python = ">=3.10"
+authors = [
+    {name = "Alexis Shakas", email = "alexis.shakas@erdw.ethz.ch"},
+]
+keywords = ["deep-learning", "geophysics", "borehole", "televiewer", "fracture-detection"]
+
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "scikit-image>=0.21",
+    "scikit-learn>=1.3",
+    "matplotlib>=3.7",
+    "rasterio>=1.3",
+    "shapely>=2.0",
+    "openpyxl>=3.1",
+    "pooch>=1.7",
+    "opencv-python>=4.8",
+    "polars>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+jax = [
+    "jax>=0.4",
+    "jaxlib>=0.4",
+]
+gui = [
+    "streamlit>=1.30",  # legacy GUI (app.py); being superseded by the napari desktop app
+    "pyqtgraph>=0.13",  # fast browse viewer
+    "napari[all]>=0.5",
+    "magicgui>=0.8",
+    "zarr>=2.16",
+]
+
+[project.urls]
+Repository = "https://gitlab.com/shakasa/deeplogger"
+
+[tool.setuptools.packages.find]
+include = ["deeplogger*"]
+exclude = ["test*", "notebooks*", "preparation*", "model*", "scrap*"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
