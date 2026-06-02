@@ -224,7 +224,14 @@ def launch_labeler(
         The :class:`napari.Viewer` instance.
     """
     import napari
-    from magicgui.widgets import Container, FloatSpinBox, Label, LineEdit, PushButton
+    from magicgui.widgets import (
+        Container,
+        FloatSlider,
+        FloatSpinBox,
+        Label,
+        LineEdit,
+        PushButton,
+    )
 
     viewer = napari.Viewer(title=f"DeepLogger label — {source_name}")
     if data_type is DataType.OTV:
@@ -238,13 +245,19 @@ def launch_labeler(
         name="pick", edge_color="cyan", face_color="transparent", edge_width=1.0
     )
 
-    state = {"picks": [], "saved_n": 0, "picking": False, "current": None}
+    state = {"picks": [], "saved_n": 0, "picking": False, "updating": False}
 
     # --- picker panel ------------------------------------------------------
+    # The candidate sinusoid is always drawn from these parameters; the drag
+    # gesture and the sliders both edit them, so the curve previews live.
+    d_lo, d_hi = float(depth.min()), float(depth.max())
     pick_btn = PushButton(text="Pick structure")
+    depth_w = FloatSlider(min=d_lo, max=d_hi, value=(d_lo + d_hi) / 2, label="depth [m]")
+    dip_w = FloatSlider(min=0.0, max=89.0, value=30.0, label="dip [deg]")
+    az_w = FloatSlider(min=0.0, max=360.0, value=0.0, label="azimuth [deg]")
     diam_w = FloatSpinBox(min=0.01, max=1.0, value=float(diameter or 0.1), label="diameter [m]")
     aperture_w = FloatSpinBox(min=0.0, max=100.0, value=5.0, label="aperture [mm]")
-    readout = Label(value="(drag on the image to pick)")
+    readout = Label(value="")
     save_pick_btn = PushButton(text="Save pick")
 
     # --- save panel --------------------------------------------------------
@@ -256,9 +269,18 @@ def launch_labeler(
     borehole_w = LineEdit(value=source_name, label="Borehole")
     out_dir_w = LineEdit(value=str(output_dir or OUTPUT_DIR), label="Output dir")
 
-    def _set_curve(points: np.ndarray):
-        curve_layer.data = [points]
-        curve_layer.shape_type = "path"
+    def _current_fracture() -> Fracture:
+        return Fracture(
+            azimuth=az_w.value, dip=dip_w.value, depth=depth_w.value, aperture=aperture_w.value
+        )
+
+    def _redraw(*_):
+        """Redraw the live preview curve from the current parameters."""
+        fr = _current_fracture()
+        points = sinusoid_curve(fr, depth, n_azimuth, diam_w.value)
+        curve_layer.data = []
+        curve_layer.add_paths(points, edge_color="cyan", edge_width=2.0)
+        readout.value = f"depth {fr.depth:.2f} m | dip {fr.dip:.1f}° | az {fr.azimuth:.1f}°"
 
     def _toggle_pick():
         state["picking"] = not state["picking"]
@@ -275,33 +297,34 @@ def launch_labeler(
         if not state["picking"]:
             return
         r0, c0 = image_layer.world_to_data(event.position)[:2]
-        click_row = int(round(r0))
         yield
         while event.type == "mouse_move":
             r, c = image_layer.world_to_data(event.position)[:2]
             fr = gesture_to_fracture(
-                click_row, c - c0, r - r0, depth, n_azimuth, diam_w.value, aperture_w.value
+                int(round(r0)), c - c0, r - r0, depth, n_azimuth, diam_w.value, aperture_w.value
             )
-            state["current"] = fr
-            _set_curve(sinusoid_curve(fr, depth, n_azimuth, diam_w.value))
-            readout.value = f"depth {fr.depth:.2f} m | dip {fr.dip:.1f}° | az {fr.azimuth:.1f}°"
+            # Drive the sliders (which redraw the preview); guard the redraw so
+            # each move triggers a single redraw, not one per slider.
+            state["updating"] = True
+            depth_w.value, dip_w.value, az_w.value = fr.depth, fr.dip, fr.azimuth
+            state["updating"] = False
+            _redraw()
             yield
 
     viewer.mouse_drag_callbacks.append(_on_drag)
 
+    def _on_param_changed(*_):
+        if not state["updating"]:
+            _redraw()
+
     def _save_pick():
-        fr = state["current"]
-        if fr is None:
-            status.value = "No pick to save — drag on the image first."
-            return
+        fr = _current_fracture()
         state["picks"].append(fr)
         band = get_label(fr, depth, diam_w.value, n_azimuth)
         data = np.asarray(mask_layer.data)
         data[band > 0] = 1
         mask_layer.data = data
         mask_layer.refresh()
-        state["current"] = None
-        curve_layer.data = []
         status.value = f"{len(state['picks'])} pick(s) staged."
 
     def _save_label():
@@ -324,10 +347,13 @@ def launch_labeler(
     save_pick_btn.clicked.connect(_save_pick)
     save_label_btn.clicked.connect(_save_label)
     save_picks_btn.clicked.connect(_save_picks)
+    for w in (depth_w, dip_w, az_w, diam_w):
+        w.changed.connect(_on_param_changed)
+    _redraw()  # show the candidate curve immediately
 
     picker = Container(widgets=[
-        Label(value="Pick structure (or paint the label layer)"),
-        pick_btn, diam_w, aperture_w, readout, save_pick_btn,
+        Label(value="Pick structure (drag image) or adjust sliders, then Save pick"),
+        pick_btn, depth_w, dip_w, az_w, diam_w, aperture_w, readout, save_pick_btn,
     ])
     save_panel = Container(widgets=[Label(value="Save"), save_label_btn, save_picks_btn, status])
     settings = Container(widgets=[Label(value="Output settings"), borehole_w, out_dir_w])
