@@ -1,3 +1,8 @@
+## 2026-06-04 — Wiki migrated to .wiki/ research-wiki submodule
+
+- [ ] **FIRST: wire `.wiki/` private remote.** Create empty private repo, then convert the local `.wiki/` repo into a proper git submodule (add remote, push, register in `.gitmodules`). Until done, do NOT `git add .wiki` in the parent. See `/research-wiki` skill.
+- [ ] Commit parent: old `docs/wiki/` deletion is unstaged in working tree — commit when ready (parent history is user-controlled).
+
 ## 2026-05-29 — GUI redesign: Napari desktop app (design finalized, see CHANGELOG "Design Decisions")
 
 Data layer (DONE — `deeplogger/las_reader.py`, `deeplogger/pyramid.py`, 117 tests):

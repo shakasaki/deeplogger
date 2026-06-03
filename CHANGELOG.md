@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 
 ## [Unreleased]
 
+### Changed (2026-06-04 — wiki migrated to research-wiki submodule)
+
+**Knowledge base relocated from `docs/wiki/` to a private `.wiki/` git submodule**, managed by the `/research-wiki` skill. Rationale: compounding research wiki that syncs across machines and stays out of the public project history; structured so pages flow directly into the manuscript.
+- Page mapping: `INDEX.md`→`index.md`, `dataset.md`→`data.md`, `methods.md`→`methods.md` (+ decisions log), `results.md`→`experiments.md`, `background.md` + paper outline + figure inventory→`manuscript.md`, "Key Implementation Files"→`code.md` (new), "Open Questions"→`open_problems.md` (new), added `log.md` (dated session narrative).
+- `references.bib` carried over verbatim (Pandoc `[@key]` citations preserved). Redundant `references.md` (rendered bibliography) dropped — regenerable from the `.bib` via pandoc.
+- `.wiki/` is currently a local-only git repo; private remote still to be wired as a proper submodule (TODO 2026-06-04).
+- `docs/wiki/` removed from the parent repo.
+
 ### Added (2026-06-03 — design document, training script)
 
 **Technical design document (`docs/DESIGN.md`):**
