@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pdftotext *)",
+      "Bash(pdfinfo *)",
+      "Bash(pdftoppm *)",
+      "Bash(conda run -n deeplogger pytest *)",
+      "Bash(conda run -n deeplogger python -m pytest *)"
+    ]
+  }
+}

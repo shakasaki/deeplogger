@@ -152,5 +152,5 @@ notebooks/
 .cache/
 
 # Claude
-.claude
 .codegraph
+.wiki
