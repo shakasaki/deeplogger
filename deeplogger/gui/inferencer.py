@@ -98,8 +98,11 @@ def run_predict(model, image: np.ndarray, device, in_channels: int) -> np.ndarra
     - OTV forward() does permute(0,3,1,2), so expects (1,H,W,3) — channel-last.
     - ATV forward() does unsqueeze(0).permute(1,0,2,3), so expects (1,H,W).
 
-    Height is padded to the nearest valid size and cropped back on return so
-    the output always matches the input spatial dimensions.
+    Both H and W are padded to the nearest valid size and cropped back on return
+    so the output always matches the input spatial dimensions.  The OTV model
+    uses pool4(stride=2, kernel=3, no-padding) which requires both dimensions to
+    satisfy dim%16==8; the ATV model is looser (stride-1 pool4 + F.interpolate)
+    but the same constraint is harmless there.
     """
     import torch
 
@@ -113,16 +116,21 @@ def run_predict(model, image: np.ndarray, device, in_channels: int) -> np.ndarra
         if img.ndim == 3:
             img = img[:, :, 0]
 
-    H_orig = img.shape[0]
+    H_orig, W_orig = img.shape[0], img.shape[1]
     H_pad = _valid_height(H_orig)
-    if H_pad > H_orig:
-        pad_spec = [(0, H_pad - H_orig), (0, 0)] + ([(0, 0)] if img.ndim == 3 else [])
+    W_pad = _valid_height(W_orig)
+
+    if H_pad > H_orig or W_pad > W_orig:
+        if img.ndim == 3:
+            pad_spec = [(0, H_pad - H_orig), (0, W_pad - W_orig), (0, 0)]
+        else:
+            pad_spec = [(0, H_pad - H_orig), (0, W_pad - W_orig)]
         img = np.pad(img, pad_spec, mode="edge")
 
     tensor = torch.from_numpy(img).unsqueeze(0).to(device)
     with torch.no_grad():
         pred = model(tensor)
-    return pred.squeeze().cpu().numpy()[:H_orig]
+    return pred.squeeze().cpu().numpy()[:H_orig, :W_orig]
 
 
 def compute_dice(prediction: np.ndarray, ground_truth: np.ndarray, threshold: float) -> float:
@@ -167,6 +175,7 @@ def launch_inferencer(
         Label,
         LineEdit,
         PushButton,
+        SpinBox,
     )
 
     viewer = napari.Viewer(title=f"DeepLogger infer — {source_name}")
@@ -293,7 +302,86 @@ def launch_inferencer(
         Label(value="Save"), save_btn, out_dir_w, save_status,
     ])
 
+    # --- correction + finetune panel ----------------------------------------
+    corr_dir_w = LineEdit(value=str(output_dir or OUTPUT_DIR), label="Correction dir")
+    save_corr_btn = PushButton(text="Save correction (.pt)")
+    corr_status = Label(value="")
+
+    n_epochs_w = SpinBox(min=1, max=200, value=20, label="epochs")
+    lr_w = LineEdit(value="1e-4", label="lr")
+    finetune_btn = PushButton(text="Fine-tune model")
+    finetune_status = Label(value="")
+
+    def _save_correction() -> Path | None:
+        """Save the user-edited overlay as a [image, mask] training bundle."""
+        import torch
+
+        out = Path(corr_dir_w.value)
+        out.mkdir(parents=True, exist_ok=True)
+        import datetime as _dt
+        stamp = _dt.datetime.now().strftime("%H%M%S")
+        path = out / f"{source_name}_correction_{stamp}.pt"
+        mask = overlay_layer.data.astype(np.uint8)
+        bundle = [
+            torch.from_numpy(np.ascontiguousarray(image)),
+            torch.from_numpy(np.ascontiguousarray(mask)),
+        ]
+        torch.save(bundle, path)
+        corr_status.value = f"Saved → {path.name}"
+        return path
+
+    def _run_finetune():
+        if state["model"] is None:
+            finetune_status.value = "Load a model first."
+            return
+        if overlay_layer.data.max() == 0:
+            finetune_status.value = "No correction drawn."
+            return
+        _save_correction()
+
+        try:
+            lr_val = float(lr_w.value)
+        except ValueError:
+            finetune_status.value = "Invalid lr."
+            return
+
+        model_path = model_combo.value
+        data_dir_val = corr_dir_w.value
+        n_ep = n_epochs_w.value
+        finetune_status.value = "Fine-tuning…"
+
+        import threading
+        from deeplogger.train import finetune as _finetune
+
+        def _work():
+            try:
+                out_path = _finetune(
+                    model_path,
+                    data_dir_val,
+                    n_epochs=n_ep,
+                    lr=lr_val,
+                    progress_callback=lambda ep, total, loss: setattr(
+                        finetune_status, "value", f"Epoch {ep}/{total} loss={loss:.4f}"
+                    ),
+                )
+                finetune_status.value = f"Done → {Path(out_path).name}"
+            except Exception as exc:
+                finetune_status.value = f"Error: {exc}"
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    save_corr_btn.clicked.connect(_save_correction)
+    finetune_btn.clicked.connect(_run_finetune)
+
+    correction_panel = Container(widgets=[
+        Label(value="Edit overlay, then save correction and fine-tune"),
+        corr_dir_w, save_corr_btn,
+        n_epochs_w, lr_w, finetune_btn,
+        corr_status, finetune_status,
+    ])
+
     viewer.window.add_dock_widget(model_panel, area="left", name="Model")
     viewer.window.add_dock_widget(infer_panel, area="left", name="Inference")
     viewer.window.add_dock_widget(save_panel, area="left", name="Save")
+    viewer.window.add_dock_widget(correction_panel, area="left", name="Correction")
     return viewer

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DeepLogger
+Comment=Borehole televiewer log viewer and fracture labeler
+Exec=/home/alexis/git/deeplogger/launch_deeplogger.sh %f
+Icon=utilities-terminal
+Terminal=false
+Categories=Science;Education;
+MimeType=application/x-las;
+StartupNotify=true

@@ -6,6 +6,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 
 ## [Unreleased]
 
+### Added (2026-06-03 — inference pipeline, v2 architectures, GUI improvements)
+
+**Inference pipeline (Route 2):**
+- `deeplogger/gui/inferencer.py` — full napari inference UI: model panel (auto-discover `.pt` files, detect ATV/OTV from state dict), inference panel (run U-Net, probability map layer, threshold slider, live binary overlay, Dice vs ground truth), save panel (save raw prediction), correction panel (save user-edited overlay as `[image, mask]` training bundle + fine-tune from corrections in a background thread).
+- `deeplogger/train.py:finetune()` — fine-tune an existing model on a directory of correction bundles. Adam + BCE, configurable epochs/lr, progress callback for UI updates, saves `<stem>_finetuned.pt`.
+- `run_predict()` now pads **both H and W** to satisfy `H%16==8, W%16==8` (OTV model uses `pool4(stride=2, kernel=3, no-padding)` which requires both spatial dims to satisfy this constraint — only H was padded before, causing tensor cat failures on non-standard widths). Output is cropped back to original shape.
+- `_valid_height()` — computes smallest valid spatial dim ≥ H satisfying `%16==8`. Required because OTV's `pool4(k=3,s=2)` + `upconv4(k=3,s=2)` only round-trips cleanly when dim/8 is odd.
+- `test/test_inferencer.py` — 19 tests: `_valid_height` constraint, `run_predict` output shape (ATV 1-ch, OTV 3-ch, arbitrary H/W, channel coercion), `compute_dice` boundary cases.
+
+**V2 model architectures (`deeplogger/model_architectures_v2.py`):**
+- `UNetATV` — faithful Perritaz (2024) ATV U-Net with per-sample min-max normalisation added to `forward()`. All skip connections use `F.interpolate` (no more hard divisibility constraint on input size). pool4 retained as size-preserving `MaxPool(k=3,s=1,p=1)`.
+- `AttentionUNetATV` — extended version: attention gates (Oktay et al., 2018) on all four skip connections, spatial `Dropout2d` on enc3/enc4/bottleneck, pool4 changed to `MaxPool(k=2,s=2)` (was a no-op at stride=1), all decoder steps use `F.interpolate` for size-robustness.
+- `AttentionGate` — soft spatial gate: gating signal from decoder modulates encoder skip features via learned α ∈ (0,1). Directly addresses <1% foreground imbalance.
+- `_norm_input()` — per-sample min-max normalisation to [0,1], applied inside `forward()` so inference is invariant to ATV amplitude scale differences between boreholes.
+- Both models accept any (H, W) without padding constraints. Param counts: UNetATV 7.76M, AttentionUNetATV 7.89M (+130K for gates).
+
+**`ModelType` enum + training wiring:**
+- `deeplogger/config.py` — `ModelType` enum: `UNET_ATV_V1` (original), `UNET_ATV_V2` (v2 + norm), `ATTENTION_UNET_ATV`, `UNET_OTV`. Added `model_type: ModelType = ModelType.UNET_ATV_V2` field to `TrainingConfig`; `from_dict` deserialises it; backward-compatible with old pickled configs via `getattr(config, 'model_type', None)`.
+- `deeplogger/train.py:_build_model()` — dispatches on `ModelType`; falls back to legacy `data_type` logic when `model_type` is absent (old configs).
+
+**`BCEDiceLoss` (`deeplogger/loss_functions.py`):**
+- Weighted BCE + Dice combination. Shape-agnostic (handles both `(B,H,W)` from v2 models and `(B,1,H,W)` from v1). Cites Sudre et al. 2017 (arXiv:1707.03237) and Alexakis & Armenakis 2020 (doi:10.3390/rs12101672). Replaces the inline anonymous class in `_build_loss()`.
+- `deeplogger/train.py:_build_loss()` — now uses the proper `BCEDiceLoss` class.
+
+**GUI launcher + bundle inspector:**
+- `deeplogger/gui/launcher.py` — Qt start screen with "Browse / Label" and "Inspect Bundles" buttons. Shown when the viewer starts with no file argument.
+- `deeplogger/gui/bundle_inspector.py` — pyqtgraph widget that browses a directory of `[image, mask]` `.pt` bundles: side-by-side image/mask display, ← → keyboard navigation, status bar showing filename / index / mask coverage %.
+- `deeplogger/gui/viewer.py:__main__` — now shows launcher when called with no args; direct path arg still opens viewer immediately.
+- `launch_deeplogger.sh` + `deeplogger.desktop` — double-click desktop launcher: activates `deeplogger` conda env and opens the GUI via the launcher.
+
+**Architecture diagram:**
+- `scripts/plot_architectures.py` — matplotlib block diagram of both v2 architectures (U-shape layout, channel counts at each stage, attention gates marked in red, dropout badges in purple, pool4 annotation). Saves to `docs/architecture_diagram.png`.
+
+**Tests:**
+- Total test count: 162 → 193 (+31). New: `test_inferencer.py` (19), `TestBCEDiceLoss` (8), `TestModelType` (4).
+
+### Investigation findings (2026-06-03)
+- **All models in `models/` are 3-channel OTV models** trained on `Bedretto_Output/` (RGB [0,1] normalized optical data). The thesis best ATV model (Adam, epoch 75, 1-channel) is not in the repo — it was never committed. Training data for ATV (1709 manually-drawn snippets) exists at `~/DATA/Bedretto varia/Data_Msc_Thesis_Perritaz/data/Training_data_manually_Drawn_labels/atv_data_label/`. To reproduce the thesis best model, run `model/train_2D_Unet_BCELoss_ATV.py` (Adam + BCE + 1-ch UNetOTV from `model_architectures_ATV`) on that data, or use the new `TrainingConfig(model_type=ModelType.UNET_ATV_V2, ...)` with `deeplogger/train.py`.
+- **`detect_model_channels` is insufficient** for disambiguating ATV vs OTV architecture: can check `upconv4.weight.shape` (kernel 2×2 = ATV, 3×3 = OTV). The 3-ch models in `models/` use OTV architecture (pool4 stride=2) despite being trained on stacked-grayscale ATV images.
+
 ### Added
 - napari labeling bridge from the browse viewer. A "Label window…" button hands the **currently visible depth window** (full resolution, including any SVD destriping) to napari via `deeplogger/gui/labeler.py:launch_labeler`. Windows above `MAX_LABEL_ROWS` (20k full-res rows) are refused with a "zoom in" prompt; selection uses the display bounds, not a separate ROI drag. Two label modes share one Labels layer:
   - **Mask painting** — napari's native freehand brush.

@@ -31,6 +31,14 @@ class OptimizerType(Enum):
     SGD = "sgd"
 
 
+class ModelType(Enum):
+    """Available U-Net model architectures."""
+    UNET_ATV_V1 = "unet_atv_v1"          # original Perritaz architecture (model_architectures_ATV)
+    UNET_ATV_V2 = "unet_atv_v2"          # Perritaz + per-sample normalisation (model_architectures_v2)
+    ATTENTION_UNET_ATV = "attention_unet_atv"  # attention gates + dropout (model_architectures_v2)
+    UNET_OTV = "unet_otv"                 # original 3-channel OTV architecture (model_architectures_OTV)
+
+
 @dataclass
 class Borehole:
     """Physical and data parameters for a borehole.
@@ -113,6 +121,7 @@ class TrainingConfig:
     data_dir: str
     model_dir: str
     data_type: DataType = DataType.ATV
+    model_type: ModelType = ModelType.UNET_ATV_V2
     loss_type: LossType = LossType.BCE
     optimizer_type: OptimizerType = OptimizerType.ADAM
     max_epochs: int = 600
@@ -150,6 +159,8 @@ class TrainingConfig:
             d["loss_type"] = LossType(d["loss_type"])
         if "optimizer_type" in d and isinstance(d["optimizer_type"], str):
             d["optimizer_type"] = OptimizerType(d["optimizer_type"])
+        if "model_type" in d and isinstance(d["model_type"], str):
+            d["model_type"] = ModelType(d["model_type"])
         # Filter out keys that aren't TrainingConfig fields
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
         d = {k: v for k, v in d.items() if k in valid_keys}

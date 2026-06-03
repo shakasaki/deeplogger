@@ -107,6 +107,67 @@ def smoothf1_loss(labels_pred: torch.Tensor, labels: torch.Tensor, epsilon: floa
     return smoothf1
 
 
+class BCEDiceLoss(nn.Module):
+    """Weighted combination of Binary Cross-Entropy and Dice losses.
+
+    BCE alone penalises per-pixel errors equally regardless of class frequency,
+    which is poor for highly imbalanced data (fractures are <1 % of pixels).
+    Dice loss directly optimises the overlap coefficient, compensating for
+    imbalance by focusing on the foreground class.  Combining both yields stable
+    early training (BCE) and strong foreground sensitivity (Dice).
+
+    The combined loss is::
+
+        L = bce_weight * BCE(pred, target) + dice_weight * Dice(pred, target)
+
+    Accepts predictions of shape ``(B, H, W)`` **or** ``(B, 1, H, W)``; targets
+    must match.  Predictions must already be sigmoid-activated probabilities in
+    ``[0, 1]``.
+
+    Args:
+        bce_weight: Scalar weight applied to the BCE term. Default ``0.5``.
+        dice_weight: Scalar weight applied to the Dice term. Default ``0.5``.
+
+    References:
+        Sudre, C. H., Li, W., Vercauteren, T., Ourselin, S., & Cardoso, M. J.
+        (2017). Generalised Dice overlap as a deep learning loss function for
+        highly unbalanced segmentations. *MICCAI Workshop on Deep Learning in
+        Medical Image Analysis*. arXiv:1707.03237.
+
+        Alexakis, C., & Armenakis, C. (2020). DeepNadirSeg: Segmentation of
+        flooded buildings from nadir drone imagery using an encoder-decoder
+        architecture. *Remote Sensing*, 12(10), 1672.
+        https://doi.org/10.3390/rs12101672
+
+    Examples:
+        >>> import torch
+        >>> loss_fn = BCEDiceLoss(bce_weight=0.5, dice_weight=0.5)
+        >>> pred   = torch.sigmoid(torch.randn(2, 4, 4))
+        >>> target = (torch.rand(2, 4, 4) > 0.8).float()
+        >>> loss   = loss_fn(pred, target)
+        >>> 0.0 <= loss.item() <= 2.0
+        True
+    """
+
+    def __init__(self, bce_weight: float = 0.5, dice_weight: float = 0.5):
+        super().__init__()
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+        self._bce = nn.BCELoss()
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Flatten both to 1-D so the function is shape-agnostic (3-D or 4-D).
+        p = pred.contiguous().view(-1)
+        t = target.contiguous().view(-1)
+
+        smooth = 1.0
+        intersection = (p * t).sum()
+        dice = 1.0 - (2.0 * intersection + smooth) / (p.sum() + t.sum() + smooth)
+
+        bce = self._bce(pred, target)
+        return self.bce_weight * bce + self.dice_weight * dice
+
+
 def wrap_loss_fn(loss_fn: Callable, axis: int = 0, reduction: Optional[str] = 'mean') -> Callable:
     """Wrap a loss function for vectorization and loss reduction."""
     def wrapped_loss_fn(*args):

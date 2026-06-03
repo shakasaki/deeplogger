@@ -429,7 +429,9 @@ def launch_viewer(path: str | Path) -> None:
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) != 2:
-        print("usage: python -m deeplogger.gui.viewer <log.las | cache.zarr>")
-        sys.exit(1)
-    launch_viewer(sys.argv[1])
+    if len(sys.argv) == 2:
+        # Direct path argument: skip launcher, open file immediately.
+        launch_viewer(sys.argv[1])
+    else:
+        from deeplogger.gui.launcher import launch
+        launch()

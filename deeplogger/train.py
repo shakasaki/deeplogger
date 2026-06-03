@@ -16,20 +16,37 @@ import torch.optim as optim
 import torch.utils.data as data
 from torchvision.transforms import Compose, RandomHorizontalFlip, RandomVerticalFlip
 
-from deeplogger.config import TrainingConfig, DataType, LossType, OptimizerType
-from deeplogger.model_architectures_ATV import UNetOTV as UNetATV
-from deeplogger.model_architectures_OTV import UNetOTV as UNetOTV
+from deeplogger.config import TrainingConfig, DataType, LossType, ModelType, OptimizerType
+from deeplogger.model_architectures_ATV import UNetOTV as _UNetATV_v1
+from deeplogger.model_architectures_OTV import UNetOTV as _UNetOTV
+from deeplogger.model_architectures_v2 import UNetATV as _UNetATV_v2, AttentionUNetATV as _AttentionUNetATV
 from deeplogger.dataloader import Dataset_np as Dataset
-from deeplogger.loss_functions import DiceLoss
+from deeplogger.loss_functions import BCEDiceLoss, DiceLoss
 from deeplogger.common_helpers import create_directory
 
 
 def _build_model(config: TrainingConfig, device: torch.device) -> nn.Module:
-    """Instantiate the appropriate U-Net model based on data type."""
-    if config.data_type == DataType.ATV:
-        model = UNetATV(in_channels=1, out_channels=1, init_features=config.init_features)
+    """Instantiate the U-Net model.
+
+    Dispatches on ``config.model_type`` when present (new-style configs).
+    Falls back to the legacy ``config.data_type`` logic for old pickled configs
+    that pre-date the ``model_type`` field.
+    """
+    mt = getattr(config, "model_type", None)
+
+    if mt == ModelType.UNET_ATV_V2:
+        model = _UNetATV_v2(in_channels=1, out_channels=1, init_features=config.init_features)
+    elif mt == ModelType.ATTENTION_UNET_ATV:
+        model = _AttentionUNetATV(in_channels=1, out_channels=1, init_features=config.init_features)
+    elif mt == ModelType.UNET_OTV:
+        model = _UNetOTV(in_channels=3, out_channels=1, init_features=config.init_features)
     else:
-        model = UNetOTV(in_channels=3, out_channels=1, init_features=config.init_features)
+        # UNET_ATV_V1 or legacy (no model_type field)
+        if config.data_type == DataType.ATV:
+            model = _UNetATV_v1(in_channels=1, out_channels=1, init_features=config.init_features)
+        else:
+            model = _UNetOTV(in_channels=3, out_channels=1, init_features=config.init_features)
+
     return model.to(device).float()
 
 
@@ -40,12 +57,7 @@ def _build_loss(config: TrainingConfig) -> nn.Module:
     elif config.loss_type == LossType.DICE:
         return DiceLoss()
     elif config.loss_type == LossType.BCE_DICE:
-        bce = nn.BCELoss()
-        dice = DiceLoss()
-        class BCEDiceLoss(nn.Module):
-            def forward(self, pred, target):
-                return 0.5 * bce(pred, target) + dice(pred, target)
-        return BCEDiceLoss()
+        return BCEDiceLoss(bce_weight=0.5, dice_weight=0.5)
     elif config.loss_type == LossType.BCE_LOGITS:
         return nn.BCEWithLogitsLoss()
     else:
@@ -200,3 +212,85 @@ def train(config: TrainingConfig) -> dict:
 
     print(f"Training complete. Best validation loss: {best_val_loss:.4f}")
     return results
+
+
+def finetune(
+    model_path: str,
+    data_dir: str,
+    *,
+    n_epochs: int = 20,
+    lr: float = 1e-4,
+    output_path: str | None = None,
+    progress_callback=None,
+) -> str:
+    """Fine-tune an existing model on a small set of correction bundles.
+
+    Loads the state dict from *model_path*, trains for *n_epochs* on all
+    ``.pt`` bundles in *data_dir* using BCE loss and Adam, then saves the
+    updated state dict to *output_path*.
+
+    Args:
+        model_path: Path to an existing ``.pt`` state-dict file.
+        data_dir: Directory containing ``.pt`` correction bundles.
+        n_epochs: Number of training epochs (default 20).
+        lr: Learning rate (default 1e-4).
+        output_path: Where to save the finetuned model.  Defaults to
+            ``<model_path stem>_finetuned.pt`` in the same directory.
+        progress_callback: Optional ``callable(epoch, n_epochs, loss)``
+            called after each epoch (for UI progress updates).
+
+    Returns:
+        Path to the saved finetuned model.
+    """
+    from deeplogger.dataloader import BoreholeDataset
+
+    if output_path is None:
+        stem = os.path.splitext(model_path)[0]
+        output_path = stem + "_finetuned.pt"
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    in_ch = int(
+        torch.load(model_path, map_location="cpu", weights_only=False)[
+            "encoder1.enc1conv1.weight"
+        ].shape[1]
+    )
+    if in_ch == 3:
+        model = UNetOTV(in_channels=3, out_channels=1, init_features=32)
+    else:
+        model = UNetATV(in_channels=1, out_channels=1, init_features=32)
+
+    sd = torch.load(model_path, map_location=device, weights_only=False)
+    model.load_state_dict(sd)
+    model.to(device).train()
+
+    dataset = BoreholeDataset.from_directory(data_dir)
+    if len(dataset) == 0:
+        raise ValueError(f"No .pt bundles found in {data_dir}")
+
+    loader = data.DataLoader(dataset, batch_size=1, shuffle=True)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    loss_fn = nn.BCELoss()
+
+    for epoch in range(n_epochs):
+        epoch_loss = 0.0
+        for images, masks in loader:
+            masks = _binarize_mask(masks)
+            images = images.to(device).float()
+            masks = masks.to(device).float().squeeze(1)
+
+            optimizer.zero_grad()
+            preds = model(images)
+            loss = loss_fn(preds, masks)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+
+        avg_loss = epoch_loss / len(loader)
+        print(f"Finetune epoch {epoch + 1}/{n_epochs}: loss={avg_loss:.4f}")
+        if progress_callback is not None:
+            progress_callback(epoch + 1, n_epochs, avg_loss)
+
+    torch.save(model.state_dict(), output_path)
+    print(f"Finetuned model saved → {output_path}")
+    return output_path

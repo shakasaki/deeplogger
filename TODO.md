@@ -22,10 +22,19 @@ Route 1 — View / Pick data (GUI, in progress):
 - [ ] Add aperture column to the picks CSV? (interactive pick has an aperture field but CSV omits it by design)
 - [ ] Reconcile `get_label` vs `apply_label` geometry mismatch (band = ±aperture/2 + corrections vs ±aperture, no corrections); labeler uses `get_label`
 
-Route 2 — Inference + Correct (later):
-- [ ] Run inference on a (converted/lazy) log → prediction mask as editable Labels layer
-- [ ] Human reinforcement loop: user corrects predicted picks
-- [ ] Retrain (fine-tune) from corrections — not full training
+Route 2 — Inference + Correct (DONE 2026-06-03):
+- [x] Run inference on a log window → probability map + binary overlay in napari (`deeplogger/gui/inferencer.py`)
+- [x] Human correction loop: user edits overlay → "Save correction" saves `[image, mask]` bundle
+- [x] Fine-tune from corrections: `train.py:finetune()` + "Fine-tune model" button in inferencer
+- [issue] All saved models are 3-ch OTV architecture, not the ATV 1-ch model from the thesis. ATV training data (1709 snippets) is at `~/DATA/Bedretto varia/Data_Msc_Thesis_Perritaz/data/Training_data_manually_Drawn_labels/atv_data_label/`. Must retrain before inference is useful on ATV data.
+
+## 2026-06-03
+
+- [ ] Write `docs/DESIGN.md` — technical design document covering: problem & data, preprocessing, model architectures (UNetATV v1/v2, AttentionUNetATV), loss functions (BCE, Dice, BCE+Dice), training strategy (splits, optimizer, scheduler), inference & GUI pipeline, fine-tuning loop. Section 8 = complete reference list (all papers cited in code + Perritaz thesis).
+- [ ] Retrain ATV model: `TrainingConfig(model_type=ModelType.UNET_ATV_V2, data_dir="~/DATA/.../atv_data_label/", loss_type=LossType.BCE_DICE, optimizer_type=OptimizerType.ADAM)` on GPU. Also train `AttentionUNetATV` and compare validation Dice + F1. Best model from thesis used Adam + BCE, epoch 75 — now reproducible via `train.py`.
+- [ ] Add dataset split by borehole (not random) to `train.py` to prevent spatial-correlation leakage — test set should be whole boreholes (SB/BFE), not random snippets.
+- [ ] Start menu item "Inspect Bundles" verified working end-to-end (launcher → bundle_inspector).
+- [ ] Manual-verify napari labeler flow on a real log (sinusoid pick gesture, paint, save).
 
 ## 2026-04-03
 - [ ] Fix GUI to run models successfully on all data types (ATV inference still failing in Streamlit)
