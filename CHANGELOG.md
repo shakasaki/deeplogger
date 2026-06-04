@@ -71,6 +71,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 - **`detect_model_channels` is insufficient** for disambiguating ATV vs OTV architecture: can check `upconv4.weight.shape` (kernel 2×2 = ATV, 3×3 = OTV). The 3-ch models in `models/` use OTV architecture (pool4 stride=2) despite being trained on stacked-grayscale ATV images.
 
 ### Added
+- `deeplogger/gui/inferencer.py` — napari inference viewer, parallel to `labeler.py`. `launch_inferencer(image, depth, *, data_type, n_azimuth, mask, source_name, output_dir)` opens a napari window with three dock panels:
+  - **Model panel**: discovers `.pt` state-dict files from `models/`, `data/IDs_and_model/`, `data/models/`; loads with auto-detected ATV/OTV channels (same `encoder1.enc1conv1.weight.shape[1]` heuristic as `app.py`); shows device and channel type in a status label.
+  - **Inference panel**: threshold slider (0–1) + "Run inference" button → updates a `hot`-colormap probability layer and a binary overlay layer live. If ground truth mask is provided, shows Dice coefficient.
+  - **Save panel**: saves `[image, prediction]` as a `.pt` bundle to the output directory.
+  - Launched from `viewer.py` via a new "Infer window…" button (sits next to "Label window…" in a button row).
+- `viewer.py:LogViewer._on_infer_clicked` — hands the current depth window to `launch_inferencer`; closes any previous inferencer window first (same pattern as `_on_label_clicked`).
+- `inferencer.py:find_models`, `detect_model_channels`, `load_model` — model discovery and loading helpers, extracted from `app.py` logic (no streamlit dependency).
+- `inferencer.py:_valid_height(H)` — computes the smallest H' ≥ H satisfying `H' % 16 == 8`, the exact condition for all four UNetOTV skip connections to round-trip without size mismatch. **Key finding:** UNetOTV pool4 uses `kernel_size=3` (not 2), so enc4→pool4→upconv4 only round-trips when enc4 = H/8 is odd, which combined with the standard stride-2 pooling requirement gives H ≡ 8 (mod 16). Any viewer window with other heights failed at the enc3/dec3 or enc1/dec1 concat. Input is padded with `np.pad(mode="edge")` to the next valid height; output is cropped back to the original size.
+
+### Fixed
+- `inferencer.py:run_predict` — both `UNetOTV` and `UNetATV` perform channel reordering **inside** `forward()` (OTV: `x.permute(0,3,1,2)`; ATV: `x.unsqueeze(0).permute(1,0,2,3)`), so the correct input format is channel-last `(1,H,W,3)` for OTV and `(1,H,W)` for ATV — no manual transpose. Initial implementation wrongly transposed OTV input to `(1,3,H,W)` before the model's own permute, causing a "got 360 channels, expected 3" error. Fixed to pass `image.unsqueeze(0)` directly; grayscale images fed to an OTV model are stacked to 3 channels with `np.stack`.
+
+
 - napari labeling bridge from the browse viewer. A "Label window…" button hands the **currently visible depth window** (full resolution, including any SVD destriping) to napari via `deeplogger/gui/labeler.py:launch_labeler`. Windows above `MAX_LABEL_ROWS` (20k full-res rows) are refused with a "zoom in" prompt; selection uses the display bounds, not a separate ROI drag. Two label modes share one Labels layer:
   - **Mask painting** — napari's native freehand brush.
   - **Interactive sinusoid picking** — "Pick structure" arms a mouse mode on the image: the click row sets the centre depth, horizontal drag sets the azimuth (one image width = 360° of phase), vertical drag sets the dip via the curve's amplitude (`amplitude = (D/2)/cos(dip)`, using the per-log diameter). A live curve tracks the gesture on a Shapes layer. "Save pick" rasterizes the band (`labels.py:get_label`, at an editable aperture) into the Labels layer and stages the pick. This replaces the earlier slider-based picker.

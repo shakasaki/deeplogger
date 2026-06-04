@@ -3,6 +3,13 @@
 - [ ] **FIRST: wire `.wiki/` private remote.** Create empty private repo, then convert the local `.wiki/` repo into a proper git submodule (add remote, push, register in `.gitmodules`). Until done, do NOT `git add .wiki` in the parent. See `/research-wiki` skill.
 - [ ] Commit parent: old `docs/wiki/` deletion is unstaged in working tree — commit when ready (parent history is user-controlled).
 
+## 2026-06-02
+
+- [issue] Sine/sinusoid picker not functioning properly — drag gesture and/or curve preview unreliable on real data; needs manual testing on actual log to diagnose (interaction with napari event loop? coordinate mapping issue?).
+- [issue] Labeler + inferencer napari UI layout not user-friendly — dock panel arrangement, widget sizing, and workflow order need UX pass.
+- [issue] Inference predictions poor quality — likely a training data / model limitation rather than code bug; all available models are OTV 3-ch, trained on limited Bedretto dataset. Need better-trained models before the inferencer is useful for science.
+- [ ] Install DeepLogger on cluster and run proper model training — better GPU, more epochs, possibly more data. See `environment.yml` for deps; `deeplogger/train.py:train(TrainingConfig)` is the entry point.
+
 ## 2026-05-29 — GUI redesign: Napari desktop app (design finalized, see CHANGELOG "Design Decisions")
 
 Data layer (DONE — `deeplogger/las_reader.py`, `deeplogger/pyramid.py`, 117 tests):
