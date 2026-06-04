@@ -81,13 +81,13 @@ class BundleInspector(QtWidgets.QWidget):
         nav = QtWidgets.QHBoxLayout()
         self._prev_btn = QtWidgets.QPushButton("◀  Prev")
         self._next_btn = QtWidgets.QPushButton("Next  ▶")
-        self._prev_btn.setShortcut(QtCore.Qt.Key_Left)
-        self._next_btn.setShortcut(QtCore.Qt.Key_Right)
+        self._prev_btn.setShortcut(QtCore.Qt.Key.Key_Left)
+        self._next_btn.setShortcut(QtCore.Qt.Key.Key_Right)
         self._prev_btn.clicked.connect(self._prev)
         self._next_btn.clicked.connect(self._next)
 
         self._status = QtWidgets.QLabel()
-        self._status.setAlignment(QtCore.Qt.AlignCenter)
+        self._status.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         nav.addWidget(self._prev_btn)
         nav.addStretch()
@@ -109,9 +109,9 @@ class BundleInspector(QtWidgets.QWidget):
             self._load(self._idx + 1)
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == QtCore.Qt.Key_Left:
+        if event.key() == QtCore.Qt.Key.Key_Left:
             self._prev()
-        elif event.key() == QtCore.Qt.Key_Right:
+        elif event.key() == QtCore.Qt.Key.Key_Right:
             self._next()
         else:
             super().keyPressEvent(event)

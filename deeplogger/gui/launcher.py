@@ -34,7 +34,9 @@ class Launcher(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("DeepLogger")
-        self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint)
+        self.setWindowFlags(
+            self.windowFlags() & ~QtCore.Qt.WindowType.WindowContextHelpButtonHint
+        )
         self.setMinimumWidth(340)
         self._build_ui()
         self._viewer = None
@@ -50,7 +52,7 @@ class Launcher(QtWidgets.QDialog):
         layout.setContentsMargins(28, 24, 28, 24)
 
         title = QtWidgets.QLabel("<b>DeepLogger</b>")
-        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 18px; margin-bottom: 4px;")
         layout.addWidget(title)
 
@@ -58,7 +60,7 @@ class Launcher(QtWidgets.QDialog):
             "Borehole televiewer log viewer,\n"
             "fracture labeler and deep-learning inference tool"
         )
-        subtitle.setAlignment(QtCore.Qt.AlignCenter)
+        subtitle.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet("color: #888; font-size: 10px;")
         layout.addWidget(subtitle)
 
