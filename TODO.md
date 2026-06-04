@@ -1,7 +1,7 @@
 ## 2026-06-04 — Wiki migrated to .wiki/ research-wiki submodule
 
-- [ ] **FIRST: wire `.wiki/` private remote.** Create empty private repo, then convert the local `.wiki/` repo into a proper git submodule (add remote, push, register in `.gitmodules`). Until done, do NOT `git add .wiki` in the parent. See `/research-wiki` skill.
-- [ ] Commit parent: old `docs/wiki/` deletion is unstaged in working tree — commit when ready (parent history is user-controlled).
+- [x] **Wire `.wiki/` private remote.** Done 2026-06-04: `.wiki/` registered as submodule of `git@github.com:shakasaki/deeplogger-wiki.git` (full migrated wiki pulled from remote). `.wiki` removed from `.gitignore`; `.gitmodules` added.
+- [ ] Commit parent gitlink: `.gitignore` + `.gitmodules` + `.wiki` gitlink are staged but uncommitted — commit when ready (parent history is user-controlled). (`docs/wiki/` deletion already committed in f46b8b8.)
 
 ## 2026-06-02
 
