@@ -1,7 +1,13 @@
+## 2026-06-04 — GUI PyQt6 fixes + literature review (session close)
+
+- [issue] **GUI still stuck on data load** after the PyQt6 fixes (commits `ed8b84f`→`f409341`→`367052c`). Launch + launcher work; "Browse → open file" was still reported stuck. Next: run the isolation test `python -m deeplogger.gui.viewer /path/to/log.las` (bypasses launcher) — loads fine ⇒ confirm `367052c` nesting fix is right; also hangs ⇒ bug is inside `launch_viewer`/`LogViewer` (e.g. `BoreholeLog.open().to_zarr()` blocking on a big file), not the event loop. User is verifying locally.
+- [ ] **Implement Tversky / Focal-Tversky** in `deeplogger/loss_functions.py` (α=0.3, β=0.7, γ=4/3) — blocker for the revised training grid; only `BCEDiceLoss`/`DiceLoss` exist. See `.wiki/methods.md §2.4`, `.wiki/experiments.md`.
+- [ ] **Exercise napari labeler + inferencer under PyQt6** — only `launcher.py`/`bundle_inspector.py` were fixed/scanned; `viewer.py`, `labeler.py`, `inferencer.py` run downstream code not yet exercised under PyQt6 (may hit more enum/`exec_` renames).
+
 ## 2026-06-04 — Wiki migrated to .wiki/ research-wiki submodule
 
 - [x] **Wire `.wiki/` private remote.** Done 2026-06-04: `.wiki/` registered as submodule of `git@github.com:shakasaki/deeplogger-wiki.git` (full migrated wiki pulled from remote). `.wiki` removed from `.gitignore`; `.gitmodules` added.
-- [ ] Commit parent gitlink: `.gitignore` + `.gitmodules` + `.wiki` gitlink are staged but uncommitted — commit when ready (parent history is user-controlled). (`docs/wiki/` deletion already committed in f46b8b8.)
+- [x] Commit parent gitlink. Done: `.gitignore`/`.gitmodules` committed (`1591933`, `ab59583`); `.wiki` gitlink bumped to wiki commit `f5660c9` in the session-close commit.
 
 ## 2026-06-02
 

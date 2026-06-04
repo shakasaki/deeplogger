@@ -6,6 +6,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 
 ## [Unreleased]
 
+### Fixed (2026-06-04 — Napari GUI runs under PyQt6)
+
+The `deeplogger-gui` environment uses **PyQt6**, which broke the GUI launcher on three counts (the code was written for PyQt5):
+- **Scoped enums** — PyQt6 removed flat enum access. Migrated 8 sites in `deeplogger/gui/launcher.py` and `deeplogger/gui/bundle_inspector.py` to scoped form (`Qt.WindowType.WindowContextHelpButtonHint`, `Qt.AlignmentFlag.AlignCenter`, `Qt.Key.Key_Left/Right`; forward-compatible with modern PyQt5/PySide). Fixes `AttributeError: type object 'Qt' has no attribute 'WindowContextHelpButtonHint'` on launch.
+- **`exec_()` → `exec()`** — PyQt6 renamed the `QDialog`/`QApplication` event-loop method (`launcher.launch()`).
+- **Nested event loop** — `Launcher` ran a modal `exec()` loop whose Browse slot then called `launch_viewer()`, starting a second `pg.exec()` loop while the first was still on the stack → `QCoreApplication::exec: The event loop is already running`, hanging on data load. Refactored `launcher.py`: slots now only record the user's choice (`_path` / `_inspector`) and `accept()`; `launch()` dispatches the viewer/inspector **after** the modal loop unwinds, running a single event loop. `viewer.launch_viewer` left unchanged (self-contained for the standalone `python -m deeplogger.gui.viewer <path>` entry point).
+- **Not yet runtime-confirmed** on the user's machine — data load was still reported stuck after these fixes; user took it local to verify with the standalone-viewer isolation test. See TODO 2026-06-04.
+
+### Changed (2026-06-04 — wiki wired to private remote + literature review folded in)
+
+- `.wiki/` **wired as a proper git submodule** of `git@github.com:shakasaki/deeplogger-wiki.git` (parent commits `1591933`, `ab59583`): `.wiki` removed from `.gitignore`, `.gitmodules` registered. Supersedes the "local-only, remote to be wired" status from the migration entry below.
+- **Deep-research literature review** (21 sources; 16/25 claims survived 3-vote adversarial verification; crack-detection + geoscience analogues) folded into the wiki (`.wiki` commit `f5660c9`). Methodological outcomes for the manuscript:
+  - **Loss is the evidenced lever, not the attention architecture.** Under extreme imbalance (<1 % foreground), plain Dice has unstable gradients and plain BCE over-weights background; the **Focal-Tversky / Unified Focal family** is recommended. Evidence: 12-loss crack-segmentation benchmark (Nguyen & Thai 2023, `doi:10.1016/j.engstruct.2023.116988`); Unified Focal at 0.2 % foreground DSC 0.634 vs Dice 0.536 vs CE 0.336 (Yeung et al. 2022, `doi:10.1016/j.compmedimag.2021.102026`). Recommended Focal-Tversky α=0.3, β=0.7, γ=4/3.
+  - **Attention gates have no published support** for binary thin-structure segmentation (RQ1 unresolved either way) → `AttentionUNetATV` demoted from "best expected" to an ablation in the training grid.
+  - SAM/SAM2 foundation models ruled out as the primary segmenter (fail on low-contrast thin structures); domain-specific augmentation (flips, colour jitter, blur, mixup) confirmed effective for the small-data regime.
+  - Added 6 Crossref-verified-DOI references to `.wiki/references.bib` (`salehi2017tversky`, `yeung2022unified`, `nguyen2023crack`, `wu2019faultseg`, `yu2024u2net`, `zhang2024sam`); revised `methods.md` (§2.4 new), `experiments.md` grid, `open_problems.md`, `index.md`.
+
 ### Changed (2026-06-04 — wiki migrated to research-wiki submodule)
 
 **Knowledge base relocated from `docs/wiki/` to a private `.wiki/` git submodule**, managed by the `/research-wiki` skill. Rationale: compounding research wiki that syncs across machines and stays out of the public project history; structured so pages flow directly into the manuscript.
