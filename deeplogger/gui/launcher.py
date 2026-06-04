@@ -41,6 +41,7 @@ class Launcher(QtWidgets.QDialog):
         self._build_ui()
         self._viewer = None
         self._inspector = None
+        self._path = None
 
     # ------------------------------------------------------------------
     # UI
@@ -107,9 +108,10 @@ class Launcher(QtWidgets.QDialog):
         )
         if not path:
             return
+        # Record the choice and close; the viewer is launched at the top level
+        # in launch() so we don't start a nested event loop inside this slot.
+        self._path = path
         self.accept()
-        from deeplogger.gui.viewer import launch_viewer
-        launch_viewer(path)
 
     def _on_inspect(self) -> None:
         directory = QtWidgets.QFileDialog.getExistingDirectory(
@@ -120,16 +122,24 @@ class Launcher(QtWidgets.QDialog):
         try:
             from deeplogger.gui.bundle_inspector import BundleInspector
             self._inspector = BundleInspector(directory)
-            self._inspector.show()
-            self.accept()
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self, "No bundles found", str(exc))
+            return
+        # Shown at the top level in launch(); see _on_browse.
+        self.accept()
 
 
 def launch() -> None:
     """Start the application: show the launcher, then hand off to user choice."""
-    app = pg.mkQApp("DeepLogger")
+    app = pg.mkQApp("DeepLogger")  # noqa: F841 (keeps the app alive)
     launcher = Launcher()
     launcher.exec()
-    # If the user closed the launcher without choosing, just exit.
-    app.exec()
+    # Dispatch the user's choice AFTER the launcher's modal loop has unwound,
+    # so the viewer/inspector runs the only event loop (no nesting).
+    if launcher._path is not None:
+        from deeplogger.gui.viewer import launch_viewer
+        launch_viewer(launcher._path)
+    elif launcher._inspector is not None:
+        launcher._inspector.show()
+        pg.exec()
+    # else: user closed the launcher without choosing — just exit.
