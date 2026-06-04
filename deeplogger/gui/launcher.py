@@ -130,6 +130,6 @@ def launch() -> None:
     """Start the application: show the launcher, then hand off to user choice."""
     app = pg.mkQApp("DeepLogger")
     launcher = Launcher()
-    launcher.exec_()
+    launcher.exec()
     # If the user closed the launcher without choosing, just exit.
-    app.exec_()
+    app.exec()
