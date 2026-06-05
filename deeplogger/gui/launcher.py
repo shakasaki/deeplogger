@@ -130,16 +130,31 @@ class Launcher(QtWidgets.QDialog):
 
 
 def launch() -> None:
-    """Start the application: show the launcher, then hand off to user choice."""
+    """Start the application under a single Qt event loop.
+
+    A modal ``QDialog.exec()`` for the launcher followed by a second
+    ``pg.exec()`` for the viewer nests two event loops, which PyQt6/pyqtgraph
+    rejects with ``QCoreApplication::exec: The event loop is already running``
+    (the second ``exec()`` returns immediately, so the viewer never becomes
+    interactive). Instead, show the launcher **non-modally** and dispatch the
+    user's choice on its ``accepted`` signal, opening the viewer/inspector
+    inside the one and only ``pg.exec()`` loop.
+    """
     app = pg.mkQApp("DeepLogger")  # noqa: F841 (keeps the app alive)
     launcher = Launcher()
-    launcher.exec()
-    # Dispatch the user's choice AFTER the launcher's modal loop has unwound,
-    # so the viewer/inspector runs the only event loop (no nesting).
-    if launcher._path is not None:
-        from deeplogger.gui.viewer import launch_viewer
-        launch_viewer(launcher._path)
-    elif launcher._inspector is not None:
-        launcher._inspector.show()
-        pg.exec()
-    # else: user closed the launcher without choosing — just exit.
+    # Top-level windows must outlive the slot that creates them, or they are
+    # garbage-collected the moment the dispatch returns.
+    windows: list = []
+
+    def _dispatch() -> None:
+        if launcher._path is not None:
+            from deeplogger.gui.viewer import open_viewer
+            windows.append(open_viewer(launcher._path))
+        elif launcher._inspector is not None:
+            launcher._inspector.show()
+            windows.append(launcher._inspector)
+        # else: launcher rejected/closed — nothing to open.
+
+    launcher.accepted.connect(_dispatch)
+    launcher.show()
+    pg.exec()

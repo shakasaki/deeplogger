@@ -402,17 +402,24 @@ class LogViewer(QtWidgets.QWidget):
         )
 
 
-def launch_viewer(path: str | Path) -> None:
-    """Open the browse viewer on a ``.zarr`` cache or a ``.las`` file.
+def open_viewer(path: str | Path) -> "LogViewer":
+    """Build and show a browse viewer for a ``.zarr`` cache or ``.las`` file.
+
+    Does **not** start an event loop — the caller is responsible for running
+    one (or already has one running). This lets the launcher open a viewer from
+    inside its single application loop without nesting ``exec()`` calls.
 
     A ``.las`` file is converted to a cached pyramid (under ``<dir>/.cache``)
     before viewing; a ``.zarr`` path is opened directly.
 
     Args:
         path: Path to a ``.las`` log or a ``.zarr`` pyramid.
+
+    Returns:
+        The shown :class:`LogViewer`. Keep a reference so it is not garbage
+        collected while displayed.
     """
     path = Path(path)
-    app = pg.mkQApp("DeepLogger viewer")  # noqa: F841 (keeps the app alive)
     if path.suffix == ".las":
         from deeplogger.las_reader import BoreholeLog
 
@@ -435,6 +442,21 @@ def launch_viewer(path: str | Path) -> None:
     viewer.setWindowTitle(f"DeepLogger — {path.name}")
     viewer.resize(500, 900)
     viewer.show()
+    return viewer
+
+
+def launch_viewer(path: str | Path) -> None:
+    """Standalone entry point: open a viewer and run the event loop.
+
+    Used by ``python -m deeplogger.gui.viewer <path>``. When the viewer is
+    opened from the launcher instead, the launcher calls :func:`open_viewer`
+    inside its own loop — see ``launcher.launch``.
+
+    Args:
+        path: Path to a ``.las`` log or a ``.zarr`` pyramid.
+    """
+    app = pg.mkQApp("DeepLogger viewer")  # noqa: F841 (keeps the app alive)
+    viewer = open_viewer(path)  # noqa: F841 (kept alive for the loop's duration)
     pg.exec()
 
 
