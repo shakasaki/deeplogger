@@ -16,6 +16,7 @@ from deeplogger.gui.labeler import (
     append_picks_csv,
     build_label_mask,
     default_label_filename,
+    depth_ticks,
     gesture_to_fracture,
     save_label_bundle,
     sinusoid_curve,
@@ -25,6 +26,26 @@ from deeplogger.labels import get_label
 
 def _depth():
     return np.linspace(100.0, 101.0, 360)
+
+
+class TestDepthTicks:
+    """Tests for the depth-ruler tick generator."""
+
+    def test_ticks_within_range(self):
+        t = depth_ticks(13.94, 17.31)
+        assert t.min() >= 13.94 and t.max() <= 17.31
+
+    def test_round_step(self):
+        """A 1 m span / 8 ≈ 0.125 snaps up to a round 0.2 m step."""
+        t = depth_ticks(0.0, 1.0, target=8)
+        np.testing.assert_allclose(np.diff(t), 0.2, atol=1e-9)
+
+    def test_ascending(self):
+        t = depth_ticks(50.0, 200.0)
+        assert np.all(np.diff(t) > 0)
+
+    def test_degenerate_span(self):
+        np.testing.assert_array_equal(depth_ticks(5.0, 5.0), np.array([5.0]))
 
 
 def test_build_label_mask_matches_get_label():

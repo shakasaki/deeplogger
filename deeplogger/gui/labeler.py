@@ -139,6 +139,32 @@ def sinusoid_curve(
     return np.column_stack([rows, cols])
 
 
+def depth_ticks(lo: float, hi: float, target: int = 8) -> np.ndarray:
+    """Round-number depth values spanning ``[lo, hi]`` for a ruler overlay.
+
+    Picks a "nice" step (1, 2, 2.5 or 5 ×10ⁿ) closest to ``(hi-lo)/target`` and
+    returns the multiples of that step inside the range, so the depth labels
+    drawn on the napari canvas land on readable values.
+
+    Args:
+        lo: Window start depth (meters).
+        hi: Window end depth (meters).
+        target: Desired approximate number of ticks.
+
+    Returns:
+        1-D array of tick depths (meters), ascending; ``[lo]`` if the span is
+        non-positive.
+    """
+    span = hi - lo
+    if span <= 0:
+        return np.array([lo])
+    raw = span / max(target, 1)
+    mag = 10.0 ** np.floor(np.log10(raw))
+    step = next((m * mag for m in (1, 2, 2.5, 5, 10) if raw <= m * mag), 10 * mag)
+    first = np.ceil(lo / step) * step
+    return np.arange(first, hi + step * 1e-6, step)
+
+
 def default_label_filename(borehole: str, depth: np.ndarray) -> str:
     """Default ``.pt`` filename: ``<borehole>_<start>m_<end>m.pt``."""
     return f"{borehole}_{float(depth[0]):.2f}m_{float(depth[-1]):.2f}m.pt"
@@ -234,16 +260,60 @@ def launch_labeler(
     )
 
     viewer = napari.Viewer(title=f"DeepLogger label — {source_name}")
+
+    # Depth-axis stretch so the unrolled borehole displays true-to-aspect instead
+    # of a squashed horizontal stripe. A row spans ``step_m`` metres of depth, a
+    # column ``circumference / n_azimuth`` metres of wall; their ratio (~5x for
+    # Bedretto ATV) is how much napari's square pixels would otherwise crush depth,
+    # flattening fracture sinusoids into a band. Use that ratio as the row scale
+    # (an order-1 number). NB: do NOT scale in absolute metres — a sub-unit scale
+    # makes napari's "new labels" extent math allocate world_extent/scale and try
+    # to create a 100+ GiB array, crashing the app. The same scale on every layer
+    # keeps picks/labels registered; the pick gesture is in data coords
+    # (world_to_data) and is unaffected. ``nearest`` keeps the full-resolution
+    # pixels crisp under the stretch (the image is already level-0 full res).
+    n_rows = int(image.shape[0])
+    step_m = (float(depth[-1]) - float(depth[0])) / max(n_rows - 1, 1)
+    col_m = (np.pi * float(diameter or 0.1)) / max(n_azimuth, 1)
+    row_scale = float(step_m / col_m) if col_m > 0 else 1.0
+    layer_scale = (row_scale, 1.0)
+
     if data_type is DataType.OTV:
-        image_layer = viewer.add_image(image, name="log", rgb=True)
+        image_layer = viewer.add_image(image, name="log", rgb=True, scale=layer_scale)
     else:
-        image_layer = viewer.add_image(image, name="log", colormap="afmhot")
+        image_layer = viewer.add_image(
+            image, name="log", colormap="afmhot", interpolation2d="nearest",
+            scale=layer_scale,
+        )
     mask_layer = viewer.add_labels(
-        np.zeros(image.shape[:2], dtype=np.uint8), name="label"
+        np.zeros(image.shape[:2], dtype=np.uint8), name="label", scale=layer_scale
     )
     curve_layer = viewer.add_shapes(
-        name="pick", edge_color="cyan", face_color="transparent", edge_width=1.0
+        name="pick", edge_color="cyan", face_color="transparent", edge_width=1.0,
+        scale=layer_scale,
     )
+    viewer.dims.axis_labels = ("depth", "azimuth")
+
+    # Depth ruler drawn on the canvas: napari has no labelled tick axis, so place
+    # round-number depth labels down the left edge as a points layer. Points sit at
+    # (row-for-tick-depth, col=0) in data coords; the text shows the depth value in
+    # metres, so the user reads true depth directly on the image regardless of the
+    # (non-metric) display scale.
+    ticks_m = depth_ticks(float(depth.min()), float(depth.max()))
+    tick_rows = np.interp(ticks_m, depth, np.arange(n_rows))
+    tick_pts = np.column_stack([tick_rows, np.zeros(tick_rows.shape[0])])
+    viewer.add_points(
+        tick_pts,
+        name="depth ruler",
+        features={"label": [f"{d:.2f} m" for d in ticks_m]},
+        text={"string": "{label}", "color": "yellow", "anchor": "upper_left", "size": 9},
+        size=3,
+        face_color="yellow",
+        border_color="yellow",
+        scale=layer_scale,
+    )
+    # Keep the image active so the pick gesture and Labels brush stay usable.
+    viewer.layers.selection = {image_layer}
 
     state = {"picks": [], "saved_n": 0, "picking": False, "updating": False}
 
@@ -349,7 +419,8 @@ def launch_labeler(
     save_picks_btn.clicked.connect(_save_picks)
     for w in (depth_w, dip_w, az_w, diam_w):
         w.changed.connect(_on_param_changed)
-    _redraw()  # show the candidate curve immediately
+    # No candidate curve on open — the sinusoid is drawn only once the user
+    # picks (drag) or edits a slider. The picker geometry is still WIP.
 
     picker = Container(widgets=[
         Label(value="Pick structure (drag image) or adjust sliders, then Save pick"),

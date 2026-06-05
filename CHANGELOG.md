@@ -6,7 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 
 ## [Unreleased]
 
-### Added (2026-06-05 — Focal-Tversky loss implemented)
+### Fixed (2026-06-05 — napari labeler usable: aspect, depth ruler, crisp pixels)
+
+Verified live over VNC on this box. The labeler window (`deeplogger/gui/labeler.py`) was unusable for picking — the unrolled borehole rendered as a thin horizontal stripe because the image was added to napari with no `scale`, so its square pixels crushed depth.
+- **Aspect** — a window is `~step_m` (0.00417 m) per depth row vs `π·D/n_azimuth` (~0.00087 m) per azimuth column, so depth was squashed ~4.8×, flattening fracture sinusoids into a band. The image/labels/shapes layers now share a depth-axis `scale = (step_m / col_m, 1.0)` (an **order-1** ratio) so sinusoids display true-to-aspect. The pick gesture is in data coords (`world_to_data`) and is unaffected.
+- **napari sub-unit-scale footgun** — an earlier attempt scaled in absolute metres `(0.00417, 0.00087)` to get a real-depth cursor readout. This makes napari's "new labels" extent math (`world_extent / scale`) try to allocate a `(245761, 586710)` → **134 GiB** array and crash the app. Reverted to the order-1 ratio; never scale napari layers by sub-unit values.
+- **Depth on the image** — napari has no labelled tick axis, so a non-metric scale loses the depth readout. Added a `depth_ticks(lo, hi, target)` helper (nice 1/2/2.5/5×10ⁿ steps) and a "depth ruler" points layer: round-number depth labels in metres down the left edge, independent of display scale. Axis labels set to `("depth", "azimuth")`.
+- **Resolution** — the image is full-res (`_levels[0]`); the softness was napari interpolation under the stretch. ATV image now uses `interpolation2d="nearest"` for crisp pixels.
+- **No default sinusoid** — the candidate curve is no longer drawn on open (removed the initial `_redraw()`); it appears only on a drag-pick or slider edit. Sinusoid geometry is still WIP.
+- Tests: `test/test_labeler.py::TestDepthTicks` (4) plus a headless offscreen check that `launch_labeler` builds all four layers, opens with an empty curve, and yields a sane (`239×359`) new-labels extent. Suite 209 passing.
+
+### Fixed (2026-06-05 — GUI nested event loop, take two: single application loop)
 
 Implements the loss the 2026-06-04 literature review identified as the best-evidenced lever for extreme class imbalance (see `.wiki/methods.md §2.4`), unblocking the revised training grid.
 - **`FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=4/3, smooth=1.0)`** in `deeplogger/loss_functions.py`. Tversky generalises Dice by decoupling false-positive (α) and false-negative (β) penalties; β>α emphasises recall of the sparse fracture class. The focal exponent γ>1 down-weights easy pixels, steepening the gradient on the hard tail. One class serves both grid rows: γ=1 → plain Tversky, γ=4/3 → Focal-Tversky. Refs: Salehi et al. 2017 (`salehi2017tversky`); Abraham & Khan 2019 (`abraham2019focal`); focal mechanism after Lin et al. 2017 (`lin2017focal`).
