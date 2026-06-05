@@ -7,7 +7,13 @@ correct mathematical properties (boundary values, gradients, symmetry).
 import torch
 import pytest
 
-from deeplogger.loss_functions import BCEDiceLoss, DiceLoss, smoothf1_loss, reduce_loss
+from deeplogger.loss_functions import (
+    BCEDiceLoss,
+    DiceLoss,
+    FocalTverskyLoss,
+    smoothf1_loss,
+    reduce_loss,
+)
 
 
 # --- DiceLoss ---
@@ -198,6 +204,126 @@ class TestBCEDiceLoss:
         loss.backward()
         assert pred.grad is not None
         assert not torch.isnan(pred.grad).any()
+
+
+# --- FocalTverskyLoss ---
+
+class TestFocalTverskyLoss:
+    """Tests for the Focal-Tversky loss (and its plain-Tversky gamma=1 case)."""
+
+    def setup_method(self):
+        self.loss_fn = FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=4.0 / 3.0)
+
+    # -- output range / shape --
+
+    def test_output_is_scalar(self):
+        pred   = torch.sigmoid(torch.randn(2, 4, 4))
+        target = (torch.rand(2, 4, 4) > 0.8).float()
+        assert self.loss_fn(pred, target).ndim == 0
+
+    def test_loss_bounded_zero_one(self):
+        """With smooth=1 and gamma>=1 the loss stays in [0, 1]."""
+        pred   = torch.rand(4, 1, 16, 16)
+        target = (torch.rand(4, 1, 16, 16) > 0.8).float()
+        loss = self.loss_fn(pred, target)
+        assert 0.0 <= loss.item() <= 1.0
+
+    def test_accepts_3d_and_4d(self):
+        for shape in [(2, 16, 16), (2, 1, 16, 16)]:
+            pred   = torch.sigmoid(torch.randn(*shape))
+            target = (torch.rand(*shape) > 0.8).float()
+            assert self.loss_fn(pred, target).item() >= 0.0
+
+    # -- boundary behaviour --
+
+    def test_perfect_prediction_low_loss(self):
+        target = torch.zeros(2, 32, 32)
+        target[:, 8:16, 8:16] = 1.0
+        pred = target.clone().clamp(1e-6, 1 - 1e-6)
+        assert self.loss_fn(pred, target).item() < 0.05
+
+    def test_no_overlap_high_loss(self):
+        pred = torch.zeros(2, 32, 32)
+        pred[:, 0:8, 0:8] = 1.0
+        target = torch.zeros(2, 32, 32)
+        target[:, 20:28, 20:28] = 1.0
+        assert self.loss_fn(pred, target).item() > 0.9
+
+    def test_all_zeros_with_smoothing(self):
+        """Empty pred and target give TI = 1, loss = 0 (smooth term)."""
+        pred = torch.zeros(2, 16, 16)
+        target = torch.zeros(2, 16, 16)
+        assert self.loss_fn(pred, target).item() < 0.01
+
+    # -- gamma=1 reduces to Tversky; alpha=beta=0.5 reduces to Dice --
+
+    def test_tversky_symmetric_alpha_beta_equals_dice(self):
+        """Tversky with alpha=beta=0.5 (gamma=1) equals the Dice loss in the
+        smooth->0 limit. The two place the smoothing constant differently, so
+        they agree only as the foreground sums grow large relative to smooth;
+        large tensors make the residual gap negligible."""
+        pred   = torch.rand(2, 1, 128, 128)
+        target = (torch.rand(2, 1, 128, 128) > 0.7).float()
+        tversky = FocalTverskyLoss(alpha=0.5, beta=0.5, gamma=1.0)(pred, target)
+        dice = DiceLoss()(pred, target)
+        assert abs(tversky.item() - dice.item()) < 1e-3
+
+    def test_recall_weighting_penalises_fn_more_than_fp(self):
+        """alpha<beta: a false-negative-heavy error costs more than the mirror
+        false-positive-heavy error of equal magnitude."""
+        fn_fn = FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=1.0)
+        target = torch.zeros(1, 16, 16)
+        target[:, 4:12, 4:12] = 1.0
+        # Under-segment (misses half the foreground -> false negatives).
+        under = torch.zeros(1, 16, 16)
+        under[:, 4:8, 4:12] = 1.0
+        # Over-segment by the same number of pixels (false positives).
+        over = target.clone()
+        over[:, 12:16, 4:12] = 1.0
+        assert fn_fn(under, target).item() > fn_fn(over, target).item()
+
+    def test_focusing_exponent_shrinks_small_loss(self):
+        """For a loss in (0,1), gamma>1 yields a smaller value than gamma=1."""
+        pred   = torch.sigmoid(torch.randn(2, 16, 16))
+        target = (torch.rand(2, 16, 16) > 0.8).float()
+        plain  = FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=1.0)(pred, target)
+        focal  = FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=4.0 / 3.0)(pred, target)
+        if 0.0 < plain.item() < 1.0:
+            assert focal.item() < plain.item()
+
+    # -- gradient --
+
+    def test_gradient_flows(self):
+        pred   = torch.rand(2, 16, 16, requires_grad=True)
+        target = (torch.rand(2, 16, 16) > 0.8).float()
+        loss = self.loss_fn(pred, target)
+        loss.backward()
+        assert pred.grad is not None
+        assert not torch.isnan(pred.grad).any()
+
+
+# --- _build_loss wiring ---
+
+class TestBuildLossTversky:
+    """The new LossType values must construct the right loss in train.py."""
+
+    def test_focal_tversky_loss_type_builds(self):
+        from deeplogger.config import LossType, TrainingConfig
+        from deeplogger.train import _build_loss
+        cfg = TrainingConfig(data_dir="/tmp", model_dir="/tmp",
+                             loss_type=LossType.FOCAL_TVERSKY)
+        loss = _build_loss(cfg)
+        assert isinstance(loss, FocalTverskyLoss)
+        assert abs(loss.gamma - 4.0 / 3.0) < 1e-9
+
+    def test_tversky_loss_type_builds_with_gamma_one(self):
+        from deeplogger.config import LossType, TrainingConfig
+        from deeplogger.train import _build_loss
+        cfg = TrainingConfig(data_dir="/tmp", model_dir="/tmp",
+                             loss_type=LossType.TVERSKY)
+        loss = _build_loss(cfg)
+        assert isinstance(loss, FocalTverskyLoss)
+        assert loss.gamma == 1.0
 
 
 # --- ModelType in TrainingConfig ---

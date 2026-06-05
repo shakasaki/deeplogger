@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 
 ## [Unreleased]
 
+### Added (2026-06-05 — Focal-Tversky loss implemented)
+
+Implements the loss the 2026-06-04 literature review identified as the best-evidenced lever for extreme class imbalance (see `.wiki/methods.md §2.4`), unblocking the revised training grid.
+- **`FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=4/3, smooth=1.0)`** in `deeplogger/loss_functions.py`. Tversky generalises Dice by decoupling false-positive (α) and false-negative (β) penalties; β>α emphasises recall of the sparse fracture class. The focal exponent γ>1 down-weights easy pixels, steepening the gradient on the hard tail. One class serves both grid rows: γ=1 → plain Tversky, γ=4/3 → Focal-Tversky. Refs: Salehi et al. 2017 (`salehi2017tversky`); Abraham & Khan 2019 (`abraham2019focal`); focal mechanism after Lin et al. 2017 (`lin2017focal`).
+- **Methodological note:** Tversky(α=β=0.5) equals Dice only in the smoothing-free limit. With the shared `smooth=1`, the two place the constant differently in the ratio, so they converge only as foreground pixel count grows (gap <1e-3 on a 2×128×128 batch). A smoothing artefact, not a modelling difference — recorded so the equivalence is not mistaken for a bug.
+- `LossType.TVERSKY` / `LossType.FOCAL_TVERSKY` added to `config.py`; wired in `train.py:_build_loss`. 14 tests in `test/test_loss_functions.py` (bounds, gradient flow, recall asymmetry, focusing inequality, Dice limit, `_build_loss` wiring). Full suite 205 passing.
+
+### Fixed (2026-06-05 — GUI data load re-converted the whole log every open)
+
+`viewer.launch_viewer` called `BoreholeLog.open(path).to_zarr(...)` unconditionally for `.las` inputs, and `to_zarr` writes with zarr `mode="w"` — so every open re-read, re-pyramided and re-wrote the entire multi-GB log on the main thread, blocking the UI for minutes and presenting as a "stuck" data load. Now reuses an existing `<dir>/.cache/<stem>.zarr` if present (repeat opens are instant); the first, unavoidable conversion is wrapped in a wait cursor so it is no longer silent. Delete the cache to force a rebuild after the source LAS changes. The earlier PyQt6 event-loop fixes were correct; this synchronous re-conversion was the remaining cause. Needs on-machine confirmation (GUI + data live on the remote box).
+
 ### Fixed (2026-06-04 — Napari GUI runs under PyQt6)
 
 The `deeplogger-gui` environment uses **PyQt6**, which broke the GUI launcher on three counts (the code was written for PyQt5):

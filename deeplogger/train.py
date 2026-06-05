@@ -21,7 +21,7 @@ from deeplogger.model_architectures_ATV import UNetOTV as _UNetATV_v1
 from deeplogger.model_architectures_OTV import UNetOTV as _UNetOTV
 from deeplogger.model_architectures_v2 import UNetATV as _UNetATV_v2, AttentionUNetATV as _AttentionUNetATV
 from deeplogger.dataloader import Dataset_np as Dataset
-from deeplogger.loss_functions import BCEDiceLoss, DiceLoss
+from deeplogger.loss_functions import BCEDiceLoss, DiceLoss, FocalTverskyLoss
 from deeplogger.common_helpers import create_directory
 
 
@@ -60,6 +60,10 @@ def _build_loss(config: TrainingConfig) -> nn.Module:
         return BCEDiceLoss(bce_weight=0.5, dice_weight=0.5)
     elif config.loss_type == LossType.BCE_LOGITS:
         return nn.BCEWithLogitsLoss()
+    elif config.loss_type == LossType.TVERSKY:
+        return FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=1.0)
+    elif config.loss_type == LossType.FOCAL_TVERSKY:
+        return FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=4.0 / 3.0)
     else:
         raise ValueError(f"Unknown loss type: {config.loss_type}")
 

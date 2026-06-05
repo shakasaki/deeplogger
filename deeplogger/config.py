@@ -23,6 +23,8 @@ class LossType(Enum):
     DICE = "dice"
     BCE_DICE = "bce_dice"
     BCE_LOGITS = "bce_logits"
+    TVERSKY = "tversky"
+    FOCAL_TVERSKY = "focal_tversky"
 
 
 class OptimizerType(Enum):

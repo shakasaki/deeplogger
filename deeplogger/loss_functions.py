@@ -168,6 +168,80 @@ class BCEDiceLoss(nn.Module):
         return self.bce_weight * bce + self.dice_weight * dice
 
 
+class FocalTverskyLoss(nn.Module):
+    """Focal-Tversky loss for severely imbalanced segmentation.
+
+    The Tversky index generalises Dice by decoupling the penalties on false
+    positives and false negatives::
+
+        TI = (TP + smooth) / (TP + alpha * FP + beta * FN + smooth)
+
+    with ``TP = sum(p*t)``, ``FP = sum(p*(1-t))`` and ``FN = sum((1-p)*t)``.
+    Setting ``alpha < beta`` penalises false negatives more, emphasising recall
+    of the rare foreground class (fractures are <1 % of pixels). The Focal
+    variant raises the Tversky loss to a focusing power ``gamma`` to concentrate
+    learning on hard examples::
+
+        L = (1 - TI) ** gamma
+
+    With ``gamma == 1.0`` this is the plain Tversky loss; the literature-optimal
+    focusing exponent is ``gamma = 4/3``. Accepts predictions of shape
+    ``(B, H, W)`` **or** ``(B, 1, H, W)`` (targets must match); predictions must
+    already be sigmoid-activated probabilities in ``[0, 1]``.
+
+    Args:
+        alpha: Weight on false positives. Default ``0.3``.
+        beta: Weight on false negatives. Default ``0.7``.
+        gamma: Focusing exponent. Default ``4/3``; use ``1.0`` for plain Tversky.
+        smooth: Smoothing constant for numerical stability. Default ``1.0``.
+
+    References:
+        Salehi, S. S. M., Erdogmus, D., & Gholipour, A. (2017). Tversky loss
+        function for image segmentation using 3D fully convolutional deep
+        networks. *MICCAI Workshop on Machine Learning in Medical Imaging*.
+        arXiv:1706.05721.
+
+        Abraham, N., & Khan, N. M. (2019). A novel focal Tversky loss function
+        with improved attention U-Net for lesion segmentation. *IEEE ISBI*,
+        683-687. arXiv:1810.07842.
+
+    Examples:
+        >>> import torch
+        >>> loss_fn = FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=4/3)
+        >>> pred   = torch.sigmoid(torch.randn(2, 4, 4))
+        >>> target = (torch.rand(2, 4, 4) > 0.8).float()
+        >>> 0.0 <= loss_fn(pred, target).item() <= 1.0
+        True
+    """
+
+    def __init__(
+        self,
+        alpha: float = 0.3,
+        beta: float = 0.7,
+        gamma: float = 4.0 / 3.0,
+        smooth: float = 1.0,
+    ):
+        super().__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        self.smooth = smooth
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Flatten to 1-D so the function is shape-agnostic (3-D or 4-D).
+        p = pred.contiguous().view(-1)
+        t = target.contiguous().view(-1)
+
+        tp = (p * t).sum()
+        fp = (p * (1.0 - t)).sum()
+        fn = ((1.0 - p) * t).sum()
+
+        tversky = (tp + self.smooth) / (
+            tp + self.alpha * fp + self.beta * fn + self.smooth
+        )
+        return (1.0 - tversky).pow(self.gamma)
+
+
 def wrap_loss_fn(loss_fn: Callable, axis: int = 0, reduction: Optional[str] = 'mean') -> Callable:
     """Wrap a loss function for vectorization and loss reduction."""
     def wrapped_loss_fn(*args):

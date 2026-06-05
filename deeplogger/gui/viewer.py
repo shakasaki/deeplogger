@@ -416,7 +416,19 @@ def launch_viewer(path: str | Path) -> None:
     if path.suffix == ".las":
         from deeplogger.las_reader import BoreholeLog
 
-        store = BoreholeLog.open(path).to_zarr(path.parent / ".cache")
+        # Reuse a prior conversion: re-pyramiding a multi-GB log on every open
+        # blocks the UI for minutes and reads as a "stuck" data load. The cache
+        # path is deterministic (see BoreholeLog.to_zarr); delete it to force a
+        # rebuild after the source LAS changes.
+        cache = path.parent / ".cache" / f"{path.stem}.zarr"
+        if cache.exists():
+            store = cache
+        else:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            try:
+                store = BoreholeLog.open(path).to_zarr(path.parent / ".cache")
+            finally:
+                QtWidgets.QApplication.restoreOverrideCursor()
     else:
         store = path
     viewer = LogViewer.from_zarr(store)
