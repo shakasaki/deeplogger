@@ -22,8 +22,11 @@ report to <model-dir>/<run-name>_report.md.
 """
 
 import argparse
+import csv
 import datetime
+import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -42,7 +45,7 @@ from deeplogger.config import (
     TrainingConfig,
 )
 from deeplogger.dataloader import BoreholeDataset
-from deeplogger.train import _binarize_mask, _build_model, train
+from deeplogger.train import _binarize_mask, _build_model, _ensure_image_nchw, train
 
 
 # ---------------------------------------------------------------------------
@@ -56,9 +59,11 @@ _MODEL_CHOICES = {
     "unet_otv":          ModelType.UNET_OTV,
 }
 _LOSS_CHOICES = {
-    "bce":       LossType.BCE,
-    "dice":      LossType.DICE,
-    "bce_dice":  LossType.BCE_DICE,
+    "bce":           LossType.BCE,
+    "dice":          LossType.DICE,
+    "bce_dice":      LossType.BCE_DICE,
+    "tversky":       LossType.TVERSKY,
+    "focal_tversky": LossType.FOCAL_TVERSKY,
 }
 _OPT_CHOICES = {
     "adam": OptimizerType.ADAM,
@@ -79,8 +84,10 @@ def parse_args():
     p.add_argument("--epochs",    type=int,   default=200)
     p.add_argument("--batch-size",type=int,   default=20)
     p.add_argument("--init-features", type=int, default=32, help="U-Net base channel count")
-    p.add_argument("--seed",      type=int,   default=100)
-    p.add_argument("--no-augment",action="store_true", help="Disable random flip augmentation")
+    p.add_argument("--seed",         type=int,   default=100)
+    p.add_argument("--lr-step-size", type=int,   default=50,  help="Epochs between LR decay steps (default: 50)")
+    p.add_argument("--lr-gamma",     type=float, default=0.5, help="Multiplicative LR decay factor (default: 0.5)")
+    p.add_argument("--no-augment",   action="store_true", help="Disable random flip augmentation")
     p.add_argument("--threshold", type=float, nargs="+", default=[0.5, 0.75],
                    help="Classification threshold(s) for test evaluation (default: 0.5 0.75)")
     p.add_argument("--run-name",  default=None,
@@ -117,7 +124,7 @@ def evaluate_model(model_path: str, test_ids: list, device: torch.device,
         with torch.no_grad():
             for images, masks in loader:
                 masks = _binarize_mask(masks).squeeze().cpu().numpy()
-                images = images.to(device).float()
+                images = _ensure_image_nchw(images).to(device).float()
                 pred_prob = model(images).squeeze().cpu().numpy()
 
                 pred_bin = (pred_prob >= thr).astype(np.float32)
@@ -160,8 +167,141 @@ def _git_hash() -> str:
         return "unknown"
 
 
+def _shell_command() -> str:
+    return "python " + " ".join(shlex.quote(arg) for arg in sys.argv)
+
+
+def _threshold_summary(eval_results: dict, threshold: float) -> dict:
+    if not eval_results:
+        return {}
+    if threshold in eval_results:
+        return eval_results[threshold]
+    first_key = next(iter(eval_results))
+    return eval_results[first_key]
+
+
+def _write_run_manifest(path: str, run_name: str, device: torch.device, args, all_results: list) -> None:
+    manifest = {
+        "run_name": run_name,
+        "date": datetime.datetime.now().isoformat(timespec="seconds"),
+        "git": _git_hash(),
+        "device": str(device),
+        "cwd": os.getcwd(),
+        "command": _shell_command(),
+        "args": vars(args),
+        "models": [],
+    }
+
+    for entry in all_results:
+        tr = entry["train_results"]
+        manifest["models"].append({
+            "model_name": entry["model_name"],
+            "model_type": entry["config"].model_type.value,
+            "config_path": os.path.join(entry["config"].model_dir, f"{entry['model_name']}_config.p"),
+            "best_model_path": entry["best_model_path"],
+            "best_validation_loss": tr.get("best_validation_loss"),
+            "n_train": tr.get("n_train"),
+            "n_val": tr.get("n_val"),
+            "n_test": tr.get("n_test"),
+            "train_ids": tr.get("train_ids", []),
+            "val_ids": tr.get("val_ids", []),
+            "test_ids": tr.get("test_ids", []),
+            "evaluation": entry["eval_results"],
+        })
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(manifest, f, indent=2)
+    print(f"Run manifest written → {path}")
+
+
+def _append_run_registry(path: str, run_name: str, args, device: torch.device, all_results: list) -> None:
+    fieldnames = [
+        "timestamp",
+        "run_name",
+        "git",
+        "device",
+        "command",
+        "data_dir",
+        "data_type",
+        "model_name",
+        "model_type",
+        "loss",
+        "optimizer",
+        "lr",
+        "epochs",
+        "batch_size",
+        "augment",
+        "thresholds",
+        "n_train",
+        "n_val",
+        "n_test",
+        "best_validation_loss",
+        "test_accuracy",
+        "test_sensitivity",
+        "test_specificity",
+        "test_precision",
+        "test_f1",
+        "test_dice_mean",
+        "config_path",
+        "best_model_path",
+        "report_path",
+        "manifest_path",
+    ]
+
+    exists = os.path.exists(path)
+    timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+    git = _git_hash()
+    command = _shell_command()
+    manifest_path = os.path.join(os.path.dirname(path), f"{run_name}_manifest.json")
+    report_path = os.path.join(os.path.dirname(path), f"{run_name}_report.md")
+
+    with open(path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if not exists:
+            writer.writeheader()
+
+        for entry in all_results:
+            tr = entry["train_results"]
+            summary = _threshold_summary(entry["eval_results"], args.threshold[0])
+            writer.writerow({
+                "timestamp": timestamp,
+                "run_name": run_name,
+                "git": git,
+                "device": str(device),
+                "command": command,
+                "data_dir": os.path.expanduser(args.data_dir),
+                "data_type": args.data_type,
+                "model_name": entry["model_name"],
+                "model_type": entry["config"].model_type.value,
+                "loss": args.loss,
+                "optimizer": args.optimizer,
+                "lr": args.lr,
+                "epochs": args.epochs,
+                "batch_size": args.batch_size,
+                "augment": not args.no_augment,
+                "thresholds": "|".join(str(t) for t in args.threshold),
+                "n_train": tr.get("n_train"),
+                "n_val": tr.get("n_val"),
+                "n_test": tr.get("n_test"),
+                "best_validation_loss": tr.get("best_validation_loss"),
+                "test_accuracy": summary.get("accuracy"),
+                "test_sensitivity": summary.get("sensitivity"),
+                "test_specificity": summary.get("specificity"),
+                "test_precision": summary.get("precision"),
+                "test_f1": summary.get("f1"),
+                "test_dice_mean": summary.get("dice_mean"),
+                "config_path": os.path.join(entry["config"].model_dir, f"{entry['model_name']}_config.p"),
+                "best_model_path": entry["best_model_path"],
+                "report_path": report_path,
+                "manifest_path": manifest_path,
+            })
+
+    print(f"Run registry updated → {path}")
+
+
 def write_report(path: str, run_name: str, device: torch.device,
-                 all_results: list):
+                 all_results: list, args):
     """Write markdown report for all trained models.
 
     all_results: list of dicts, one per model, with keys:
@@ -176,6 +316,8 @@ def write_report(path: str, run_name: str, device: torch.device,
         f"**Date:** {now}  ",
         f"**Device:** {device}  ",
         f"**Git:** {git}  ",
+        f"**Working dir:** `{os.getcwd()}`  ",
+        f"**Command:** `{_shell_command()}`  ",
         f"",
     ]
 
@@ -190,6 +332,11 @@ def write_report(path: str, run_name: str, device: torch.device,
             f"---",
             f"",
             f"## {mname}",
+            f"",
+            f"**Artifacts**",
+            f"",
+            f"- Checkpoint: `{mpath}`",
+            f"- Config: `{os.path.join(cfg.model_dir, f'{mname}_config.p')}`",
             f"",
             f"### Configuration",
             f"",
@@ -218,7 +365,8 @@ def write_report(path: str, run_name: str, device: torch.device,
         n_test       = len(tr.get("test_ids", []))
 
         lines += [
-            f"- Training samples: {len(tr.get('test_ids', []))+0} test held out",
+            f"- Training samples: {tr.get('n_train', 'unknown')}",
+            f"- Validation samples: {tr.get('n_val', 'unknown')}",
             f"- Test set size: {n_test}",
             f"- Best validation loss: **{best_val:.4f}**",
             f"- Final training loss: {train_losses[-1]:.4f}" if train_losses else "- No training losses recorded",
@@ -293,6 +441,8 @@ def main():
         f"_{args.loss}_{args.optimizer}"
     )
     report_path = os.path.join(model_dir, f"{run_name}_report.md")
+    manifest_path = os.path.join(model_dir, f"{run_name}_manifest.json")
+    registry_path = os.path.join(model_dir, "training_runs.csv")
 
     all_results = []
 
@@ -309,6 +459,8 @@ def main():
             loss_type     = _LOSS_CHOICES[args.loss],
             optimizer_type= _OPT_CHOICES[args.optimizer],
             learning_rate = args.lr,
+            lr_step_size  = args.lr_step_size,
+            lr_gamma      = args.lr_gamma,
             max_epochs    = args.epochs,
             batch_size    = args.batch_size,
             batch_size_val= max(1, args.batch_size // 2),
@@ -347,7 +499,9 @@ def main():
             "best_model_path": best_model_path,
         })
 
-    write_report(report_path, run_name, device, all_results)
+    write_report(report_path, run_name, device, all_results, args)
+    _write_run_manifest(manifest_path, run_name, device, args, all_results)
+    _append_run_registry(registry_path, run_name, args, device, all_results)
 
 
 if __name__ == "__main__":

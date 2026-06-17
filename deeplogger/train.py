@@ -8,6 +8,7 @@ import os
 import pickle
 import random
 import datetime
+import sys
 
 import numpy as np
 import torch
@@ -15,6 +16,12 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
 from torchvision.transforms import Compose, RandomHorizontalFlip, RandomVerticalFlip
+
+try:
+    from tqdm.auto import tqdm
+except Exception:
+    def tqdm(iterable=None, **kwargs):
+        return iterable
 
 from deeplogger.config import TrainingConfig, DataType, LossType, ModelType, OptimizerType
 from deeplogger.model_architectures_ATV import UNetOTV as _UNetATV_v1
@@ -100,6 +107,46 @@ def _binarize_mask(mask: torch.Tensor) -> torch.Tensor:
     return mask
 
 
+def _ensure_image_nchw(images: torch.Tensor) -> torch.Tensor:
+    """Normalize image tensors to NCHW for Conv2D models.
+
+    Supports legacy bundles that store grayscale images as HxW, which become
+    NHW after DataLoader collation.
+    """
+    if images.ndim == 3:
+        # NHW -> NCHW for single-channel images.
+        return images.unsqueeze(1)
+    return images
+
+
+def _ensure_mask_nhw(masks: torch.Tensor) -> torch.Tensor:
+    """Normalize mask tensors to NHW for loss computation."""
+    if masks.ndim == 4 and masks.shape[1] == 1:
+        return masks.squeeze(1)
+    return masks
+
+
+def _random_azimuth_roll(images: torch.Tensor, masks: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply a shared cyclic roll along the azimuth axis.
+
+    ATV windows span the full 0..360 degree circumference, so shifting the
+    seam left/right is a valid augmentation. The same roll must be applied to
+    the image and mask to preserve alignment.
+    """
+    width = images.shape[-1]
+    if width <= 1:
+        return images, masks
+
+    shifts = torch.randint(0, width, (images.shape[0],), device=images.device)
+    rolled_images = []
+    rolled_masks = []
+    for image, mask, shift in zip(images, masks, shifts):
+        s = int(shift.item())
+        rolled_images.append(torch.roll(image, shifts=s, dims=-1))
+        rolled_masks.append(torch.roll(mask, shifts=s, dims=-1))
+    return torch.stack(rolled_images, dim=0), torch.stack(rolled_masks, dim=0)
+
+
 def train(config: TrainingConfig) -> dict:
     """Run a full training loop.
 
@@ -134,6 +181,8 @@ def train(config: TrainingConfig) -> dict:
     n_train = len(train_val_ids) - n_val
     full_dataset = Dataset(train_val_ids)
     train_set, val_set = torch.utils.data.random_split(full_dataset, [n_train, n_val])
+    train_ids = [train_val_ids[i] for i in train_set.indices]
+    val_ids = [train_val_ids[i] for i in val_set.indices]
 
     train_loader = data.DataLoader(train_set, batch_size=config.batch_size, shuffle=True, drop_last=True)
     val_loader = data.DataLoader(val_set, batch_size=config.batch_size_val, shuffle=False)
@@ -150,19 +199,31 @@ def train(config: TrainingConfig) -> dict:
     validation_losses = []
     best_val_loss = float('inf')
 
-    for epoch in range(config.max_epochs):
+    is_interactive_tty = sys.stdout.isatty()
+    epoch_iterator = tqdm(range(config.max_epochs), desc="Epochs", unit="epoch")
+    for epoch in epoch_iterator:
         # --- Train ---
         model.train()
         epoch_loss = 0.0
         n_batches = 0
-        for images, masks in train_loader:
+        n_train_batches = len(train_loader)
+        batch_iterator = tqdm(
+            train_loader,
+            desc=f"Epoch {epoch + 1}/{config.max_epochs}",
+            unit="batch",
+            leave=False,
+        )
+        for images, masks in batch_iterator:
             if config.augment and transform and random.random() > 0.5:
                 images = transform(images)
                 masks = transform(masks)
 
             masks = _binarize_mask(masks)
-            images = images.to(device).float()
-            masks = masks.to(device).float().squeeze(1)
+            images = _ensure_image_nchw(images).to(device).float()
+            masks = _ensure_mask_nhw(masks).to(device).float()
+
+            if config.augment:
+                images, masks = _random_azimuth_roll(images, masks)
 
             optimizer.zero_grad()
             preds = model(images)
@@ -172,9 +233,23 @@ def train(config: TrainingConfig) -> dict:
 
             epoch_loss += loss.item()
             n_batches += 1
+            batch_iterator.set_postfix(loss=f"{loss.item():.4f}")
+
+            if (not is_interactive_tty) and (n_batches % 50 == 0 or n_batches == n_train_batches):
+                print(
+                    f"Epoch {epoch + 1}/{config.max_epochs} "
+                    f"batch {n_batches}/{n_train_batches} loss={loss.item():.4f}",
+                    flush=True,
+                )
 
         avg_train_loss = epoch_loss / max(n_batches, 1)
         training_losses.append(avg_train_loss)
+        epoch_iterator.set_postfix(train_loss=f"{avg_train_loss:.4f}")
+        if not is_interactive_tty:
+            print(
+                f"Epoch {epoch + 1}/{config.max_epochs} complete: train_loss={avg_train_loss:.4f}",
+                flush=True,
+            )
 
         # --- Validate ---
         if epoch % config.validate_every == 0 and epoch > 0:
@@ -184,8 +259,8 @@ def train(config: TrainingConfig) -> dict:
             with torch.no_grad():
                 for images, masks in val_loader:
                     masks = _binarize_mask(masks)
-                    images = images.to(device).float()
-                    masks = masks.to(device).float().squeeze(1)
+                    images = _ensure_image_nchw(images).to(device).float()
+                    masks = _ensure_mask_nhw(masks).to(device).float()
                     preds = model(images)
                     loss = loss_fn(preds, masks)
                     val_loss += loss.item()
@@ -193,6 +268,7 @@ def train(config: TrainingConfig) -> dict:
 
             avg_val_loss = val_loss / max(val_batches, 1)
             validation_losses.append(avg_val_loss)
+            epoch_iterator.set_postfix(train_loss=f"{avg_train_loss:.4f}", val_loss=f"{avg_val_loss:.4f}")
             print(f"Epoch {epoch}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
 
             if avg_val_loss < best_val_loss:
@@ -207,7 +283,12 @@ def train(config: TrainingConfig) -> dict:
     results = config.to_dict()
     results['training_losses'] = training_losses
     results['validation_losses'] = validation_losses
+    results['train_ids'] = train_ids
+    results['val_ids'] = val_ids
     results['test_ids'] = list(test_ids)
+    results['n_train'] = len(train_ids)
+    results['n_val'] = len(val_ids)
+    results['n_test'] = len(test_ids)
     results['best_validation_loss'] = best_val_loss
 
     config_path = os.path.join(config.model_dir, f"{model_name}_config.p")

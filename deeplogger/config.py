@@ -130,8 +130,8 @@ class TrainingConfig:
     batch_size: int = 20
     batch_size_val: int = 16
     learning_rate: float = 0.001
-    lr_step_size: int = 1
-    lr_gamma: float = 0.75
+    lr_step_size: int = 50
+    lr_gamma: float = 0.5
     momentum: float = 0.9
     seed: int = 100
     validate_every: int = 15
