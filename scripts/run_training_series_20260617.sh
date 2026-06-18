@@ -22,8 +22,18 @@ run() {
   echo "Log: $log_path"
   echo "============================================================"
 
-  # stdbuf helps keep live output flowing in screen/tee.
-  stdbuf -oL -eL conda run -n deeplogger python scripts/run_training.py "$@" 2>&1 | tee "$log_path"
+  # Use a pseudo-terminal so tqdm progress bars render live in screen while
+  # still recording output to a log file.
+  local cmd=(conda run --no-capture-output -n deeplogger python scripts/run_training.py "$@")
+  local cmd_str
+  printf -v cmd_str '%q ' "${cmd[@]}"
+
+  if command -v script >/dev/null 2>&1; then
+    script -q -f "$log_path" -c "$cmd_str"
+  else
+    # Fallback for environments without util-linux script(1).
+    stdbuf -oL -eL "${cmd[@]}" 2>&1 | tee "$log_path"
+  fi
 
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] DONE: $name"
   echo
