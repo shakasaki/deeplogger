@@ -146,6 +146,7 @@ test/output/
 # Trained model weights (large binaries, distributed separately)
 models/
 notebooks/
+manuscript/
 
 # Local zarr browse-viewer caches
 *.zarr/
@@ -153,3 +154,6 @@ notebooks/
 
 # Claude
 .codegraph
+
+# Research wiki (Syncthing-managed, not git-tracked)
+.wiki/
