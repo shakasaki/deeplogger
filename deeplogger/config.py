@@ -38,6 +38,7 @@ class ModelType(Enum):
     UNET_ATV_V1 = "unet_atv_v1"          # original Perritaz architecture (model_architectures_ATV)
     UNET_ATV_V2 = "unet_atv_v2"          # Perritaz + per-sample normalisation (model_architectures_v2)
     ATTENTION_UNET_ATV = "attention_unet_atv"  # attention gates + dropout (model_architectures_v2)
+    ATTENTION_ONLY_UNET_ATV = "attention_only_unet_atv"  # v2 + gates only, no dropout/pool change (clean ablation)
     UNET_OTV = "unet_otv"                 # original 3-channel OTV architecture (model_architectures_OTV)
 
 
@@ -119,6 +120,10 @@ class TrainingConfig:
         augment: whether to apply data augmentation (random flips)
         init_features: initial feature count for U-Net
         model_name: optional name for saved model files
+        test_borehole: hold out all snippets from this borehole as the test set
+            (borehole-stratified split); overrides test_fraction when set
+        metadata_csv: path to the id->borehole metadata CSV (required when
+            test_borehole is set)
     """
     data_dir: str
     model_dir: str
@@ -140,6 +145,8 @@ class TrainingConfig:
     augment: bool = True
     init_features: int = 32
     model_name: Optional[str] = None
+    test_borehole: Optional[str] = None
+    metadata_csv: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Convert to a serializable dictionary."""

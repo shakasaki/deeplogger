@@ -56,6 +56,7 @@ _MODEL_CHOICES = {
     "unet_atv_v1":       ModelType.UNET_ATV_V1,
     "unet_atv_v2":       ModelType.UNET_ATV_V2,
     "attention_unet_atv": ModelType.ATTENTION_UNET_ATV,
+    "attention_only_unet_atv": ModelType.ATTENTION_ONLY_UNET_ATV,
     "unet_otv":          ModelType.UNET_OTV,
 }
 _LOSS_CHOICES = {
@@ -92,6 +93,12 @@ def parse_args():
                    help="Classification threshold(s) for test evaluation (default: 0.5 0.75)")
     p.add_argument("--run-name",  default=None,
                    help="Experiment name prefix (default: auto from date + loss + optimizer)")
+    p.add_argument("--test-borehole", default=None,
+                   help="Hold out all snippets from this borehole as the test set "
+                        "(borehole-stratified split). Overrides the random test_fraction.")
+    p.add_argument("--metadata-csv", default="data/Bedretto_input_HS/Bedretto_metadata.csv",
+                   help="id->borehole metadata CSV, used with --test-borehole "
+                        "(default: data/Bedretto_input_HS/Bedretto_metadata.csv)")
     return p.parse_args()
 
 
@@ -468,6 +475,8 @@ def main():
             seed          = args.seed,
             augment       = not args.no_augment,
             model_name    = model_name,
+            test_borehole = args.test_borehole,
+            metadata_csv  = os.path.expanduser(args.metadata_csv) if args.test_borehole else None,
         )
 
         print(f"\n{'='*60}")

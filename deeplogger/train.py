@@ -26,7 +26,11 @@ except Exception:
 from deeplogger.config import TrainingConfig, DataType, LossType, ModelType, OptimizerType
 from deeplogger.model_architectures_ATV import UNetOTV as _UNetATV_v1
 from deeplogger.model_architectures_OTV import UNetOTV as _UNetOTV
-from deeplogger.model_architectures_v2 import UNetATV as _UNetATV_v2, AttentionUNetATV as _AttentionUNetATV
+from deeplogger.model_architectures_v2 import (
+    UNetATV as _UNetATV_v2,
+    AttentionUNetATV as _AttentionUNetATV,
+    AttentionOnlyUNetATV as _AttentionOnlyUNetATV,
+)
 from deeplogger.dataloader import Dataset_np as Dataset
 from deeplogger.loss_functions import BCEDiceLoss, DiceLoss, FocalTverskyLoss
 from deeplogger.common_helpers import create_directory
@@ -45,6 +49,8 @@ def _build_model(config: TrainingConfig, device: torch.device) -> nn.Module:
         model = _UNetATV_v2(in_channels=1, out_channels=1, init_features=config.init_features)
     elif mt == ModelType.ATTENTION_UNET_ATV:
         model = _AttentionUNetATV(in_channels=1, out_channels=1, init_features=config.init_features)
+    elif mt == ModelType.ATTENTION_ONLY_UNET_ATV:
+        model = _AttentionOnlyUNetATV(in_channels=1, out_channels=1, init_features=config.init_features)
     elif mt == ModelType.UNET_OTV:
         model = _UNetOTV(in_channels=3, out_channels=1, init_features=config.init_features)
     else:
@@ -93,6 +99,55 @@ def _collect_file_ids(data_dir: str) -> list:
         if os.path.isfile(full_path) and path.endswith('.pt'):
             file_ids.append(full_path)
     return sorted(file_ids)
+
+
+def _snippet_id(path: str) -> int:
+    """Extract the integer snippet id from an ``ID_<n>_*.pt`` filename."""
+    return int(os.path.basename(path).split("_")[1])
+
+
+def _read_borehole_map(metadata_csv: str) -> dict:
+    """Map snippet id (int) -> borehole name from the metadata CSV.
+
+    The CSV is written by ``preparation/prepare_Bedretto_data_with_automatic_labels.py``
+    with columns ``id, Borehole, Start Depth (m), End Depth (m), Data type, Date``.
+    """
+    import csv
+    mapping = {}
+    with open(metadata_csv, newline="") as f:
+        for row in csv.DictReader(f):
+            mapping[int(float(row["id"]))] = row["Borehole"]
+    return mapping
+
+
+def _borehole_test_split(all_ids: list, test_borehole: str, metadata_csv: str) -> tuple[set, list]:
+    """Hold out every snippet from *test_borehole* as the test set.
+
+    Returns (test_ids, train_val_ids). Raises if the CSV does not cover every
+    snippet in the data dir (so a borehole can never silently leak into train)
+    or if the requested borehole has no snippets.
+    """
+    if not metadata_csv:
+        raise ValueError("test_borehole is set but metadata_csv is None")
+    bh_map = _read_borehole_map(metadata_csv)
+
+    missing = [p for p in all_ids if _snippet_id(p) not in bh_map]
+    if missing:
+        raise ValueError(
+            f"{len(missing)} snippet(s) in the data dir are absent from "
+            f"{metadata_csv} (e.g. {os.path.basename(missing[0])}); cannot do a "
+            f"borehole-stratified split safely."
+        )
+
+    test_ids = {p for p in all_ids if bh_map[_snippet_id(p)] == test_borehole}
+    if not test_ids:
+        available = sorted(set(bh_map.values()))
+        raise ValueError(
+            f"No snippets found for borehole {test_borehole!r}. "
+            f"Available boreholes: {available}"
+        )
+    train_val_ids = [p for p in all_ids if p not in test_ids]
+    return test_ids, train_val_ids
 
 
 def _binarize_mask(mask: torch.Tensor) -> torch.Tensor:
@@ -173,14 +228,27 @@ def train(config: TrainingConfig) -> dict:
 
     # Data
     all_ids = _collect_file_ids(config.data_dir)
-    n_test = int(len(all_ids) * config.test_fraction)
-    test_ids = set(random.sample(all_ids, n_test))
-    train_val_ids = [f for f in all_ids if f not in test_ids]
+    if config.test_borehole:
+        # Borehole-stratified split: hold out a whole borehole as test so no
+        # depth-neighbour of a test snippet leaks into training.
+        test_ids, train_val_ids = _borehole_test_split(
+            all_ids, config.test_borehole, config.metadata_csv
+        )
+        print(f"Borehole-stratified split: test borehole = {config.test_borehole} "
+              f"({len(test_ids)} snippets), train+val = {len(train_val_ids)}")
+    else:
+        n_test = int(len(all_ids) * config.test_fraction)
+        test_ids = set(random.sample(all_ids, n_test))
+        train_val_ids = [f for f in all_ids if f not in test_ids]
 
     n_val = int(len(train_val_ids) * config.val_fraction)
     n_train = len(train_val_ids) - n_val
     full_dataset = Dataset(train_val_ids)
-    train_set, val_set = torch.utils.data.random_split(full_dataset, [n_train, n_val])
+    # Use a dedicated generator so the train/val split depends only on config.seed,
+    # not on how many draws _build_model consumed from the global RNG above. This
+    # keeps the split identical across architectures with different parameter counts.
+    split_gen = torch.Generator().manual_seed(config.seed)
+    train_set, val_set = torch.utils.data.random_split(full_dataset, [n_train, n_val], generator=split_gen)
     train_ids = [train_val_ids[i] for i in train_set.indices]
     val_ids = [train_val_ids[i] for i in val_set.indices]
 

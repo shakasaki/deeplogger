@@ -296,3 +296,109 @@ class AttentionUNetATV(nn.Module):
         d1 = self.decoder1(d1)
 
         return torch.sigmoid(self.head(d1)).squeeze(1)
+
+
+# ---------------------------------------------------------------------------
+# Model 3: clean attention-only ablation (v2 + gates, nothing else)
+# ---------------------------------------------------------------------------
+
+class AttentionOnlyUNetATV(nn.Module):
+    """``UNetATV`` (v2) plus attention gates only — a clean attention ablation.
+
+    This model is identical to :class:`UNetATV` — same per-sample input
+    normalisation, same ``_conv_block`` encoders/decoders with **no** spatial
+    dropout, and the same **size-preserving** ``pool4`` (``MaxPool(k=3, s=1,
+    p=1)``) — except that each of the four skip connections is passed through an
+    :class:`AttentionGate` (Oktay et al., 2018) before concatenation.
+
+    Its purpose is to isolate the effect of the attention gates. The existing
+    :class:`AttentionUNetATV` confounds three changes at once (gates **+**
+    ``Dropout2d`` **+** a real down-sampling ``pool4``); comparing *this* model
+    to :class:`UNetATV` varies **only** the gates, so any performance difference
+    is attributable to attention alone. By construction its parameter count
+    equals :class:`AttentionUNetATV` (dropout and pool type add no parameters)
+    and exceeds :class:`UNetATV` by exactly the gate parameters.
+
+    Args:
+        in_channels: 1 for ATV amplitude, 3 if stacking grayscale to RGB.
+        out_channels: 1 (binary fracture probability).
+        init_features: base feature count (32 in thesis).
+
+    Examples:
+        >>> import torch
+        >>> model = AttentionOnlyUNetATV()
+        >>> y = model(torch.rand(2, 1, 360, 360))
+        >>> y.shape
+        torch.Size([2, 360, 360])
+
+    See Also:
+        UNetATV: the no-attention baseline this ablation is compared against.
+        AttentionUNetATV: the bundled variant (gates + dropout + real pool4).
+        AttentionGate: the Oktay (2018) soft attention gate used on each skip.
+    """
+
+    def __init__(self, in_channels: int = 1, out_channels: int = 1, init_features: int = 32):
+        super().__init__()
+        f = init_features
+
+        # Encoder / bottleneck — identical to UNetATV v2 (no dropout, pool4 size-preserving).
+        self.encoder1 = _conv_block(in_channels, f,      "enc1")
+        self.pool1    = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.encoder2 = _conv_block(f,      f * 2,  "enc2")
+        self.pool2    = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.encoder3 = _conv_block(f * 2,  f * 4,  "enc3")
+        self.pool3    = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.encoder4 = _conv_block(f * 4,  f * 8,  "enc4")
+        self.pool4    = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)  # size-preserving (v2 quirk)
+
+        self.bottleneck = _conv_block(f * 8, f * 16, "bottleneck")
+
+        # Attention gates on every skip (same dims as AttentionUNetATV).
+        self.att4 = AttentionGate(F_g=f * 16, F_x=f * 8, F_int=f * 4)
+        self.att3 = AttentionGate(F_g=f * 8,  F_x=f * 4, F_int=f * 2)
+        self.att2 = AttentionGate(F_g=f * 4,  F_x=f * 2, F_int=f)
+        self.att1 = AttentionGate(F_g=f * 2,  F_x=f,     F_int=f // 2)
+
+        self.upconv4  = nn.ConvTranspose2d(f * 16, f * 8, kernel_size=2, stride=2)
+        self.decoder4 = _conv_block(f * 16, f * 8,  "dec4")
+        self.upconv3  = nn.ConvTranspose2d(f * 8,  f * 4, kernel_size=2, stride=2)
+        self.decoder3 = _conv_block(f * 8,  f * 4,  "dec3")
+        self.upconv2  = nn.ConvTranspose2d(f * 4,  f * 2, kernel_size=2, stride=2)
+        self.decoder2 = _conv_block(f * 4,  f * 2,  "dec2")
+        self.upconv1  = nn.ConvTranspose2d(f * 2,  f,     kernel_size=2, stride=2)
+        self.decoder1 = _conv_block(f * 2,  f,      "dec1")
+
+        self.head = nn.Conv2d(f, out_channels, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (B, C, H, W) — raw ATV amplitude; normalised inside.
+        Returns:
+            (B, H, W) probability map.
+        """
+        x = _norm_input(x)
+
+        e1 = self.encoder1(x)
+        e2 = self.encoder2(self.pool1(e1))
+        e3 = self.encoder3(self.pool2(e2))
+        e4 = self.encoder4(self.pool3(e3))
+        bn = self.bottleneck(self.pool4(e4))
+
+        d4 = F.interpolate(self.upconv4(bn), e4.shape[2:], mode="bilinear", align_corners=True)
+        d4 = torch.cat([d4, self.att4(bn, e4)], dim=1)
+        d4 = self.decoder4(d4)
+
+        d3 = F.interpolate(self.upconv3(d4), e3.shape[2:], mode="bilinear", align_corners=True)
+        d3 = torch.cat([d3, self.att3(d4, e3)], dim=1)
+        d3 = self.decoder3(d3)
+
+        d2 = F.interpolate(self.upconv2(d3), e2.shape[2:], mode="bilinear", align_corners=True)
+        d2 = torch.cat([d2, self.att2(d3, e2)], dim=1)
+        d2 = self.decoder2(d2)
+
+        d1 = F.interpolate(self.upconv1(d2), e1.shape[2:], mode="bilinear", align_corners=True)
+        d1 = torch.cat([d1, self.att1(d2, e1)], dim=1)
+        d1 = self.decoder1(d1)
+
+        return torch.sigmoid(self.head(d1)).squeeze(1)
