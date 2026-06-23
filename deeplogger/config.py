@@ -25,6 +25,9 @@ class LossType(Enum):
     BCE_LOGITS = "bce_logits"
     TVERSKY = "tversky"
     FOCAL_TVERSKY = "focal_tversky"
+    DICE_FOCAL = "dice_focal"   # Dice + focal CE (Loss-Odyssey compound)
+    DICE_TOPK = "dice_topk"     # Dice + hardest-k% CE (Loss-Odyssey compound)
+    RCE = "rce"                 # BCE + L1 region-size regulariser (Liu 2023)
 
 
 class OptimizerType(Enum):

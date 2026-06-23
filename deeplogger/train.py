@@ -32,7 +32,14 @@ from deeplogger.model_architectures_v2 import (
     AttentionOnlyUNetATV as _AttentionOnlyUNetATV,
 )
 from deeplogger.dataloader import Dataset_np as Dataset
-from deeplogger.loss_functions import BCEDiceLoss, DiceLoss, FocalTverskyLoss
+from deeplogger.loss_functions import (
+    BCEDiceLoss,
+    DiceLoss,
+    FocalTverskyLoss,
+    DiceFocalLoss,
+    DiceTopKLoss,
+    RCELoss,
+)
 from deeplogger.common_helpers import create_directory
 
 
@@ -77,6 +84,12 @@ def _build_loss(config: TrainingConfig) -> nn.Module:
         return FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=1.0)
     elif config.loss_type == LossType.FOCAL_TVERSKY:
         return FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=4.0 / 3.0)
+    elif config.loss_type == LossType.DICE_FOCAL:
+        return DiceFocalLoss(alpha=0.25, gamma=2.0)
+    elif config.loss_type == LossType.DICE_TOPK:
+        return DiceTopKLoss(k_percent=10.0)
+    elif config.loss_type == LossType.RCE:
+        return RCELoss(lam=1.0)
     else:
         raise ValueError(f"Unknown loss type: {config.loss_type}")
 

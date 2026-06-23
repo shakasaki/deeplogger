@@ -65,6 +65,9 @@ _LOSS_CHOICES = {
     "bce_dice":      LossType.BCE_DICE,
     "tversky":       LossType.TVERSKY,
     "focal_tversky": LossType.FOCAL_TVERSKY,
+    "dice_focal":    LossType.DICE_FOCAL,
+    "dice_topk":     LossType.DICE_TOPK,
+    "rce":           LossType.RCE,
 }
 _OPT_CHOICES = {
     "adam": OptimizerType.ADAM,

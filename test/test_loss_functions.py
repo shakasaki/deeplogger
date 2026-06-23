@@ -11,6 +11,9 @@ from deeplogger.loss_functions import (
     BCEDiceLoss,
     DiceLoss,
     FocalTverskyLoss,
+    DiceFocalLoss,
+    DiceTopKLoss,
+    RCELoss,
     smoothf1_loss,
     reduce_loss,
 )
@@ -302,6 +305,121 @@ class TestFocalTverskyLoss:
         assert not torch.isnan(pred.grad).any()
 
 
+def _perfect_pair(shape=(2, 8, 8)):
+    """A target mask and a prediction equal to it (exact 0/1)."""
+    target = (torch.rand(*shape) > 0.8).float()
+    return target.clone(), target
+
+
+# --- DiceFocalLoss ---
+
+class TestDiceFocalLoss:
+    """Dice + binary focal cross-entropy."""
+
+    def setup_method(self):
+        self.loss_fn = DiceFocalLoss()
+
+    def test_non_negative_and_finite(self):
+        pred = torch.sigmoid(torch.randn(2, 8, 8))
+        target = (torch.rand(2, 8, 8) > 0.8).float()
+        loss = self.loss_fn(pred, target)
+        assert loss.item() >= 0.0 and torch.isfinite(loss)
+
+    def test_perfect_prediction_near_zero(self):
+        pred, target = _perfect_pair()
+        assert self.loss_fn(pred, target).item() < 0.05
+
+    def test_gradients_flow(self):
+        pred = torch.sigmoid(torch.randn(2, 8, 8)).requires_grad_(True)
+        target = (torch.rand(2, 8, 8) > 0.8).float()
+        self.loss_fn(pred, target).backward()
+        assert pred.grad is not None
+
+    def test_focusing_down_weights_easy_negatives(self):
+        """With only the focal term, gamma=2 must penalise easy negatives less than gamma=0 (plain CE)."""
+        pred = torch.full((1, 16, 16), 0.05)      # confident, all background
+        target = torch.zeros(1, 16, 16)
+        focal = DiceFocalLoss(gamma=2.0, lambda_dice=0.0)
+        plain_ce = DiceFocalLoss(gamma=0.0, lambda_dice=0.0)
+        assert focal(pred, target).item() < plain_ce(pred, target).item()
+
+
+# --- DiceTopKLoss ---
+
+class TestDiceTopKLoss:
+    """Dice + hardest-k% cross-entropy."""
+
+    def setup_method(self):
+        self.loss_fn = DiceTopKLoss(k_percent=10.0)
+
+    def test_non_negative_and_finite(self):
+        pred = torch.sigmoid(torch.randn(2, 8, 8))
+        target = (torch.rand(2, 8, 8) > 0.8).float()
+        loss = self.loss_fn(pred, target)
+        assert loss.item() >= 0.0 and torch.isfinite(loss)
+
+    def test_perfect_prediction_near_zero(self):
+        pred, target = _perfect_pair()
+        assert self.loss_fn(pred, target).item() < 0.05
+
+    def test_gradients_flow(self):
+        pred = torch.sigmoid(torch.randn(2, 8, 8)).requires_grad_(True)
+        target = (torch.rand(2, 8, 8) > 0.8).float()
+        self.loss_fn(pred, target).backward()
+        assert pred.grad is not None
+
+    def test_topk_focuses_on_hard_tail(self):
+        """Most pixels correct + a few badly wrong → top-10% CE exceeds full-mean CE."""
+        pred = torch.full((1, 10, 10), 0.99)       # confident foreground everywhere
+        target = torch.ones(1, 10, 10)
+        target[0, 0, :5] = 0.0                       # 5 % are actually background → hard, high CE
+        topk = DiceTopKLoss(k_percent=10.0, lambda_dice=0.0)
+        full = DiceTopKLoss(k_percent=100.0, lambda_dice=0.0)
+        assert topk(pred, target).item() > full(pred, target).item()
+
+    def test_invalid_k_percent_raises(self):
+        with pytest.raises(ValueError):
+            DiceTopKLoss(k_percent=0.0)
+
+
+# --- RCELoss ---
+
+class TestRCELoss:
+    """BCE + L1 region-size regulariser."""
+
+    def setup_method(self):
+        self.loss_fn = RCELoss(lam=1.0)
+
+    def test_non_negative_and_finite(self):
+        pred = torch.sigmoid(torch.randn(2, 8, 8))
+        target = (torch.rand(2, 8, 8) > 0.8).float()
+        loss = self.loss_fn(pred, target)
+        assert loss.item() >= 0.0 and torch.isfinite(loss)
+
+    def test_perfect_prediction_near_zero(self):
+        pred, target = _perfect_pair()
+        assert self.loss_fn(pred, target).item() < 0.05
+
+    def test_gradients_flow(self):
+        pred = torch.sigmoid(torch.randn(2, 8, 8)).requires_grad_(True)
+        target = (torch.rand(2, 8, 8) > 0.8).float()
+        self.loss_fn(pred, target).backward()
+        assert pred.grad is not None
+
+    def test_region_term_zero_when_proportions_match(self):
+        """RCE == BCE when mean(pred) == mean(target); RCE > BCE when they differ."""
+        import torch.nn as nn
+        bce = nn.BCELoss()
+        # proportions match (both mean 0.5) but pixels are wrong → region term 0
+        pred = torch.cat([torch.full((1, 1, 8), 0.9), torch.full((1, 1, 8), 0.1)], dim=2)
+        target = torch.cat([torch.zeros(1, 1, 8), torch.ones(1, 1, 8)], dim=2)
+        assert abs(self.loss_fn(pred, target).item() - bce(pred, target).item()) < 1e-5
+        # proportions mismatched → region term positive
+        pred2 = torch.full((1, 2, 8), 0.9)
+        target2 = torch.zeros(1, 2, 8)
+        assert self.loss_fn(pred2, target2).item() > bce(pred2, target2).item()
+
+
 # --- _build_loss wiring ---
 
 class TestBuildLossTversky:
@@ -324,6 +442,24 @@ class TestBuildLossTversky:
         loss = _build_loss(cfg)
         assert isinstance(loss, FocalTverskyLoss)
         assert loss.gamma == 1.0
+
+    def test_dice_focal_loss_type_builds(self):
+        from deeplogger.config import LossType, TrainingConfig
+        from deeplogger.train import _build_loss
+        cfg = TrainingConfig(data_dir="/tmp", model_dir="/tmp", loss_type=LossType.DICE_FOCAL)
+        assert isinstance(_build_loss(cfg), DiceFocalLoss)
+
+    def test_dice_topk_loss_type_builds(self):
+        from deeplogger.config import LossType, TrainingConfig
+        from deeplogger.train import _build_loss
+        cfg = TrainingConfig(data_dir="/tmp", model_dir="/tmp", loss_type=LossType.DICE_TOPK)
+        assert isinstance(_build_loss(cfg), DiceTopKLoss)
+
+    def test_rce_loss_type_builds(self):
+        from deeplogger.config import LossType, TrainingConfig
+        from deeplogger.train import _build_loss
+        cfg = TrainingConfig(data_dir="/tmp", model_dir="/tmp", loss_type=LossType.RCE)
+        assert isinstance(_build_loss(cfg), RCELoss)
 
 
 # --- ModelType in TrainingConfig ---
