@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/). This log also se
 
 ## [Unreleased]
 
+### Fixed (2026-07-02 — wiki `.gitignore` never actually matched, code graph wired up)
+
+The research wiki dropped its `.wiki` submodule on 2026-06-04 (`7d61672`) in favour of a plain Syncthing-synced `deeplogger.wiki/` folder, but `.gitignore` still had the old submodule-era pattern `.wiki/` — which only matches a directory literally named `.wiki`, not one ending in `.wiki`. The wiki had been showing as untracked ever since. Fixed to `*.wiki/` (+ `.codebase-memory`, added below).
+- Indexed the repo with `codebase-memory-mcp` (1339 nodes, 4285 edges, 85 files) and relocated the artifact from `.codebase-memory/` into `deeplogger.wiki/codebase-memory/`, symlinked back from `deeplogger/.codebase-memory`, so the graph index travels via Syncthing rather than git. `.codebase-memory` added to `.gitignore` (the symlink itself needs the pattern without a trailing slash to match).
+- Added a package-level Mermaid module diagram to the wiki's `code.md` (Graph index section), generated from `get_architecture()` / `query_graph()` over `File-[:IMPORTS]->*` edges: data pipeline → config → models/losses → `train.py`, the `deeplogger/gui/` package, entry-point scripts, and the legacy `model/` scripts.
+- Corrected a stale `code.md` claim: the loss-functions row said `DiceFocalLoss`/`DiceTopKLoss` were "to port," but they (plus `RCELoss`) were already implemented in `e334670` (2026-06-23). Re-verified against `deeplogger/loss_functions.py` and narrowed the still-pending item to boundary/soft-clDice (Phase-2 connectivity ablation).
+
 ### Fixed (2026-06-05 — napari labeler usable: aspect, depth ruler, crisp pixels)
 
 Verified live over VNC on this box. The labeler window (`deeplogger/gui/labeler.py`) was unusable for picking — the unrolled borehole rendered as a thin horizontal stripe because the image was added to napari with no `scale`, so its square pixels crushed depth.

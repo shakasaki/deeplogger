@@ -157,4 +157,5 @@ manuscript/
 
 # Research wiki (Syncthing-managed, not git-tracked)
 deeplogger.wiki/
-.wiki/
+*.wiki/
+.codebase-memory
